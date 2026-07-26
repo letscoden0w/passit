@@ -37,6 +37,22 @@ export class NoProviderAvailable extends Error {
   }
 }
 
+/**
+ * We cut the call short ourselves — the provider did nothing wrong.
+ *
+ * Distinguished from a provider fault because the two demand opposite
+ * responses: a provider that rate-limits should be stood down, but a provider
+ * we interrupted should be tried again immediately. Conflating them meant one
+ * too-short budget benched every provider at once, and every request for the
+ * next five minutes went straight to the scaffold without calling anyone.
+ */
+class SelfAbort extends Error {
+  constructor(message = "cut short by our own deadline") {
+    super(message);
+    this.name = "SelfAbort";
+  }
+}
+
 /** A provider refused this call. `retryAfterMs` is set when it told us how long to wait. */
 class ProviderError extends Error {
   constructor(
@@ -179,8 +195,10 @@ function benchFor(pe: ProviderError | undefined): number {
 }
 
 function shouldBench(err: unknown): boolean {
+  // Never stand a provider down for a deadline we imposed on it.
+  if (err instanceof SelfAbort) return false;
   const message = (err as Error)?.message ?? "";
-  return /\b(429|5\d\d)\b|rate.?limit|quota|timeout|abort|ECONN|fetch failed/i.test(message);
+  return /\b(429|5\d\d)\b|rate.?limit|quota|ECONN|fetch failed/i.test(message);
 }
 
 /** Read a Retry-After header (seconds, or an HTTP date) into milliseconds. */
@@ -362,7 +380,9 @@ async function fetchWithinBudget(
     return { ok: res.ok, status: res.status, headers: res.headers, text };
   } catch (err) {
     const e = err as Error;
-    throw new Error(e.name === "AbortError" ? "timeout" : e.message);
+    // Our AbortController fired: that is our deadline, not their failure.
+    if (e.name === "AbortError") throw new SelfAbort();
+    throw new Error(e.message);
   } finally {
     clearTimeout(timer);
   }

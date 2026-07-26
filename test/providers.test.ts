@@ -87,3 +87,54 @@ describe("extractJson", () => {
     assert.throws(() => extractJson('{"a": }'));
   });
 });
+
+describe("a deadline we imposed must not stand a provider down", () => {
+  const realFetch = globalThis.fetch;
+
+  it("leaves providers available after our own timeout cuts a call short", async () => {
+    process.env.GROQ_API_KEY = "k";
+    process.env.GEMINI_API_KEY = "k";
+    resetProviderHealth();
+    // Never answers, so our AbortController is what ends every call.
+    globalThis.fetch = ((_u: string, init: RequestInit) =>
+      new Promise((_res, rej) => {
+        init.signal?.addEventListener("abort", () => {
+          const e = new Error("aborted");
+          e.name = "AbortError";
+          rej(e);
+        });
+      })) as typeof fetch;
+
+    try {
+      await assert.rejects(() =>
+        complete({ system: "s", user: "u", deadline: Date.now() + 800 }),
+      );
+
+      // The providers did nothing wrong — we ran out of time. Benching them
+      // here made a single short budget poison every later request, which is
+      // what sent healthy providers to the scaffold for minutes at a stretch.
+      for (const p of providerHealth()) {
+        assert.equal(p.available, true, `${p.id} was benched for our own deadline`);
+      }
+    } finally {
+      globalThis.fetch = realFetch;
+      for (const k of ["GROQ_API_KEY", "GEMINI_API_KEY"]) delete process.env[k];
+      resetProviderHealth();
+    }
+  });
+
+  it("still benches a provider that genuinely rate-limits us", async () => {
+    process.env.GROQ_API_KEY = "k";
+    resetProviderHealth();
+    globalThis.fetch = (async () => new Response("slow down", { status: 429 })) as typeof fetch;
+
+    try {
+      await assert.rejects(() => complete({ system: "s", user: "u" }));
+      assert.equal(providerHealth()[0]?.available, false, "a 429 must still bench");
+    } finally {
+      globalThis.fetch = realFetch;
+      delete process.env.GROQ_API_KEY;
+      resetProviderHealth();
+    }
+  });
+});
