@@ -39,13 +39,14 @@ You do not approve anything. You do not touch anything. Money lands at
 
 ### The LLM providers, in a corner, doing one job
 
-Groq, Mistral, Gemini and Cerebras **write the study content and nothing else**. They:
+Groq, Mistral, Gemini, Cerebras and OpenRouter **write the study content and nothing
+else**. They:
 
 - never see a payment,
 - never talk to OKX,
 - never know a purchase happened,
 - are interchangeable — the server fails over between them and falls back to a built-in
-  deterministic scaffold if all four are down, so a paying buyer always receives a file.
+  deterministic scaffold if all five are down, so a paying buyer always receives a file.
 
 If an LLM key expires, sales still complete. If OKX credentials are wrong, nothing
 sells. They are unrelated systems.

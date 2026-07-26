@@ -181,7 +181,7 @@ export function priceLabel(usdt: number): string {
 
 // ─── LLM providers ───────────────────────────────────────────────────
 
-export type ProviderId = "groq" | "mistral" | "gemini" | "cerebras";
+export type ProviderId = "groq" | "mistral" | "gemini" | "cerebras" | "openrouter";
 
 export interface ProviderConfig {
   id: ProviderId;
@@ -194,11 +194,20 @@ const PROVIDER_ENV: Record<ProviderId, { key: string; model: string; fallbackMod
   mistral: { key: "MISTRAL_API_KEY", model: "MISTRAL_MODEL", fallbackModel: "mistral-large-latest" },
   gemini: { key: "GEMINI_API_KEY", model: "GEMINI_MODEL", fallbackModel: "gemini-2.5-flash" },
   cerebras: { key: "CEREBRAS_API_KEY", model: "CEREBRAS_MODEL", fallbackModel: "llama-3.3-70b" },
+  // `openrouter/free` is an auto-router: it picks among OpenRouter's free
+  // models and filters for the capabilities the request needs (we ask for JSON
+  // output), so one key fronts many models and survives any single one going
+  // down. Its free quota is small, which is why it belongs last in the chain.
+  openrouter: {
+    key: "OPENROUTER_API_KEY",
+    model: "OPENROUTER_MODEL",
+    fallbackModel: "openrouter/free",
+  },
 };
 
 /** Providers in priority order, filtered to those that actually have a key. */
 export function providerChain(): ProviderConfig[] {
-  const order = (process.env.LLM_PROVIDERS ?? "groq,mistral,gemini,cerebras")
+  const order = (process.env.LLM_PROVIDERS ?? "groq,mistral,gemini,cerebras,openrouter")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter((s): s is ProviderId => s in PROVIDER_ENV);

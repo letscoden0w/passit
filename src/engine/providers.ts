@@ -172,6 +172,13 @@ const OPENAI_COMPATIBLE: Partial<Record<ProviderId, string>> = {
   groq: "https://api.groq.com/openai/v1/chat/completions",
   mistral: "https://api.mistral.ai/v1/chat/completions",
   cerebras: "https://api.cerebras.ai/v1/chat/completions",
+  openrouter: "https://openrouter.ai/api/v1/chat/completions",
+};
+
+/** OpenRouter uses these for attribution and model-ranking; both are optional. */
+const OPENROUTER_HEADERS: Record<string, string> = {
+  "HTTP-Referer": "https://github.com/letscoden0w/passit",
+  "X-Title": "PassIt",
 };
 
 async function callProvider(provider: ProviderConfig, opts: CompleteOptions): Promise<string> {
@@ -191,6 +198,7 @@ async function callOpenAiCompatible(
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${provider.apiKey}`,
+      ...(provider.id === "openrouter" ? OPENROUTER_HEADERS : {}),
     },
     body: JSON.stringify({
       model: provider.model,

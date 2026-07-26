@@ -62,7 +62,8 @@ All five are also MCP tools of the same id at `POST /mcp`.
  └───────────────┬─────────────────────────────────────────────────┘
                  ▼
  ┌─ 6. content engine — free tiers, first healthy provider wins ───┐
- │      Groq ─429→ Mistral ─5xx→ Gemini ─timeout→ Cerebras         │
+ │      Groq ─429→ Mistral ─5xx→ Gemini ─timeout→ Cerebras ─429→   │
+ │        OpenRouter — auto-routes across ~20 free models          │
  │        └── all unavailable ──→ deterministic scaffold           │
  │                                (pure code, no network)          │
  │      a failing provider is benched for PROVIDER_COOLDOWN_MINUTES│
@@ -222,7 +223,7 @@ curl -s -X POST http://localhost:8402/v1/explain-this \
 ```
 
 `servedBy` tells you which path produced the content: a provider id (`groq`, `mistral`,
-`gemini`, `cerebras`), `cache`, or `scaffold`.
+`gemini`, `cerebras`, `openrouter`), `cache`, or `scaffold`.
 
 ---
 
@@ -265,7 +266,7 @@ registers and bills.
 | Line item | Cost |
 | --- | --- |
 | Hosting | Render free web service (Singapore region). 750 instance-hours/month covers one service running 24/7. |
-| Content generation | Free tiers only, no credit card: Groq 14,400 req/day → Mistral 1B tokens/month → Gemini 2.5 Flash 1,500 req/day → Cerebras 1M tokens/day. |
+| Content generation | Free tiers only, no credit card: Groq 14,400 req/day → Mistral 1B tokens/month → Gemini 2.5 Flash 1,500 req/day → Cerebras 1M tokens/day → OpenRouter ~50 req/day. |
 | Repeat topics | Served from the in-memory cache. Zero LLM calls. |
 | All providers down | Deterministic scaffold. Zero LLM calls, and the buyer still gets a file. |
 | Uptime pinger | UptimeRobot or cron-job.org, free tier. |

@@ -20,22 +20,29 @@ What you are deploying: one Node web service that serves five paid endpoints
 | Mistral API key | https://console.mistral.ai | free, **no credit card** |
 | Gemini API key | https://aistudio.google.com/apikey | free, **no credit card** |
 | Cerebras API key | https://cloud.cerebras.ai | free, **no credit card** |
+| OpenRouter API key | https://openrouter.ai/keys | free, **no credit card** |
 | OKX API key / secret / passphrase | https://web3.okx.com/onchainos/dev-portal | free |
 | Receiving wallet address | your OKX Agentic Wallet (EVM `0x…` address) | free |
 | Uptime pinger account | https://uptimerobot.com or https://cron-job.org | free |
 
 ### About the LLM keys
 
-1. **No credit card is required for any of the four LLM providers.** Groq, Mistral,
-   Google AI Studio and Cerebras all issue a usable key from a plain sign-up.
-2. You do **not** need all four. Any subset works. With **zero** keys the server still
+1. **No credit card is required for any of the five LLM providers.** Groq, Mistral,
+   Google AI Studio, Cerebras and OpenRouter all issue a usable key from a plain
+   sign-up.
+2. You do **not** need all five. Any subset works. With **zero** keys the server still
    returns real PDFs from the built-in deterministic scaffold — see
    [`"servedBy": "scaffold"`](#servedby-scaffold) below.
 3. Recommended minimum: **Groq + one other**. Groq is first in the failover chain and
    has the widest free allowance (14,400 requests/day); a second key covers you when
    Groq rate-limits.
 4. Order and failover are controlled by `LLM_PROVIDERS`. Default:
-   `groq,mistral,gemini,cerebras`.
+   `groq,mistral,gemini,cerebras,openrouter`.
+5. **OpenRouter sits last on purpose.** One key fronts ~20 free models and the
+   `openrouter/free` auto-router picks whichever is up and supports the JSON output we
+   ask for — a genuine safety net on a different infrastructure path. Its free quota is
+   the smallest of the five (~50 requests/day without purchased credits), so it is a
+   last resort rather than a workhorse.
 
 ### Getting each key (click path)
 
@@ -48,7 +55,10 @@ What you are deploying: one Node web service that serves five paid endpoints
    1,500 requests/day on `gemini-2.5-flash`.
 4. **Cerebras** — https://cloud.cerebras.ai → sign in → API keys → create → copy.
    Set as `CEREBRAS_API_KEY`. Free tier is 1M tokens/day.
-5. **OKX** — https://web3.okx.com/onchainos/dev-portal → create a project → you get
+5. **OpenRouter** — https://openrouter.ai/keys → sign in → *Create Key* → copy.
+   Set as `OPENROUTER_API_KEY`. Leave `OPENROUTER_MODEL=openrouter/free` to let the
+   auto-router choose, or pin a specific free model id instead.
+6. **OKX** — https://web3.okx.com/onchainos/dev-portal → create a project → you get
    three values. Set them as `OKX_API_KEY`, `OKX_SECRET_KEY`, `OKX_PASSPHRASE`.
    These are only used when `PAYMENT_MODE=live`; they let the server verify and settle
    x402 payments through the OKX facilitator.
@@ -143,11 +153,12 @@ PORT=8402
 PAYMENT_MODE=mock
 X402_NETWORK=xlayer
 OKX_SYNC_SETTLE=true
-LLM_PROVIDERS=groq,mistral,gemini,cerebras
+LLM_PROVIDERS=groq,mistral,gemini,cerebras,openrouter
 GROQ_MODEL=llama-3.3-70b-versatile
 MISTRAL_MODEL=mistral-large-latest
 GEMINI_MODEL=gemini-2.5-flash
 CEREBRAS_MODEL=llama-3.3-70b
+OPENROUTER_MODEL=openrouter/free
 PROVIDER_COOLDOWN_MINUTES=5
 CACHE_ENABLED=true
 CACHE_MAX_ENTRIES=500
@@ -168,6 +179,7 @@ GROQ_API_KEY=
 MISTRAL_API_KEY=
 GEMINI_API_KEY=
 CEREBRAS_API_KEY=
+OPENROUTER_API_KEY=
 ```
 
 Deploy with `PAYMENT_MODE=mock` first. It boots with anything missing, so you can
@@ -504,7 +516,7 @@ What to do:
 ### `"servedBy": "scaffold"` in the response
 
 `servedBy` reports which path produced the content: a provider id (`groq`, `mistral`,
-`gemini`, `cerebras`), `cache`, or `scaffold`.
+`gemini`, `cerebras`, `openrouter`), `cache`, or `scaffold`.
 
 `scaffold` means **no LLM produced this** — every configured provider was unavailable
 (or none is configured), so the built-in deterministic generator in
