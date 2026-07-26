@@ -239,7 +239,12 @@ const PROVIDER_ENV: Record<
 
 /** Providers in priority order, filtered to those that actually have a key. */
 export function providerChain(): ProviderConfig[] {
-  const order = (process.env.LLM_PROVIDERS ?? "groq,mistral,gemini,cerebras,openrouter")
+  // Order by how much room each free tier gives, not by raw speed. Groq is the
+  // fastest but has the smallest allowance by a wide margin, and leading with
+  // it meant its ceiling shaped every request — output was trimmed, batched and
+  // chunked to fit a limit the other providers do not have. Gemini and Mistral
+  // are more generous, so they go first and Groq becomes the quick fallback.
+  const order = (process.env.LLM_PROVIDERS ?? "gemini,mistral,groq,cerebras,openrouter")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter((s): s is ProviderId => s in PROVIDER_ENV);
