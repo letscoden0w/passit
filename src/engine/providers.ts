@@ -99,7 +99,18 @@ export async function complete(
 ): Promise<CompleteResult> {
   const now = Date.now();
   const available = chain.filter((p) => !isBenched(p.id, now));
-  if (available.length === 0) throw new NoProviderAvailable();
+  if (available.length === 0) {
+    // These two look identical from the outside but mean opposite things: one
+    // is a missing key, the other is every provider rate-limited at once.
+    // Reporting both as "No LLM provider available" cost hours of guessing.
+    throw new NoProviderAvailable(
+      chain.length === 0
+        ? "No provider configured — check the API keys reached the server"
+        : `All ${chain.length} providers are rate-limited: ${chain
+            .map((p) => `${p.id} for ${Math.ceil((benchedUntil.get(p.id)! - now) / 1000)}s`)
+            .join(", ")}`,
+    );
+  }
 
   // Offer the request to providers that can serve it in FULL before those that
   // would have to truncate it. Free tiers differ enormously — the fastest one

@@ -262,6 +262,9 @@ app.get("/health", (_req, res) => {
     payment: cfg.mode,
     network: cfg.network.caip2,
     providers: providerHealth(),
+    // Same list, but stated plainly: "available" only means "not currently
+    // benched", which is easy to read as "working".
+    providersUsable: providerHealth().filter((p) => p.available).length,
     cache: cacheStats(),
   });
 });
