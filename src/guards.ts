@@ -77,7 +77,7 @@ export function clampText(value: string, max: number): string {
  * Default question count: 25 — a full practice paper, not a warm-up.
  * An explicit `count` always wins, clamped to the 3..50 range.
  */
-export function resolveQuestionCount(requested: number | undefined, target: string): number {
+export function resolveQuestionCount(requested: number | undefined): number {
   if (requested !== undefined && Number.isFinite(requested)) {
     return Math.max(LIMITS.examQuestionsMin, Math.min(LIMITS.examQuestionsMax, Math.trunc(requested)));
   }

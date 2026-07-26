@@ -14,7 +14,6 @@ import {
   paymentConfig,
   priceAtomic,
   priceLabel,
-  routeToService,
 } from "./config.js";
 import { buildRoutes, createPaymentLayer, endpointUrl } from "./payment/okx.js";
 import { providerHealth } from "./engine/providers.js";

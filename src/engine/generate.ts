@@ -26,6 +26,13 @@ export interface GenOptions {
    * holding the buyer's HTTP request open until the gateway gives up.
    */
   deadline?: number;
+  /**
+   * Whether a multi-topic Full Reviewer may fan out into a call per topic.
+   * True for the standalone service, where depth is what the buyer bought.
+   * False inside the Exam Pack, where the reviewer is one component of a
+   * bundle and the extra round trips cost more than the depth is worth.
+   */
+  chunk?: boolean;
 }
 
 export interface Generated<T> {
@@ -128,7 +135,7 @@ export async function generateReviewer(
 
   // A multi-topic Full Reviewer is generated topic by topic — see
   // generateFullReviewerChunked for why one big call cannot do the job.
-  if (kind === "full" && splitTopics(input).length > 1) {
+  if (kind === "full" && opts.chunk !== false && splitTopics(input).length > 1) {
     const chunked = await generateFullReviewerChunked(input, opts);
     if (chunked) {
       if (cacheable) cacheSet(key, chunked.value);
@@ -185,36 +192,46 @@ async function generateFullReviewerChunked(
   // Bounded so a pasted 12-topic syllabus cannot fan out into 12 paid calls.
   const topics = splitTopics(subject).slice(0, MAX_CHUNKED_TOPICS);
 
-  const parts: { sections: Reviewer["sections"] }[] = [];
-  let servedBy = "";
-  for (const [i, topic] of topics.entries()) {
-    // Stop early enough to still afford the synthesis call. Covering four
-    // topics and tying them together beats covering five and stopping dead.
-    if (parts.length > 0 && outOfBudget(opts.deadline, SYNTHESIS_RESERVE_MS)) break;
-    try {
-      const res = await complete({
-        system: SYSTEM,
-        user: fullReviewerTopicPrompt(
-          subject,
-          topic,
-          i + 1,
-          topics.length,
-          opts.materials,
-          opts.language,
-        ),
-        json: true,
-        maxTokens: 4_000,
-        deadline: opts.deadline,
-      });
-      parts.push(SectionsZ.parse(extractJson(res.text)));
-      servedBy ||= res.servedBy;
-    } catch (err) {
-      // One weak topic must not sink the whole guide — keep what we have.
-      if (!isRecoverable(err) && !(err instanceof NoProviderAvailable)) throw err;
-    }
-  }
+  // Topics are independent, so they go out together. Run one after another
+  // they turn a Full Reviewer into four round trips of latency; run at once
+  // the wall clock is the slowest single topic. Where they collide on one
+  // provider's per-minute limit the chain fails them over, which spreads the
+  // burst across providers instead of queueing it behind one.
+  //
+  // Reserve time for the synthesis call that follows.
+  const topicDeadline =
+    opts.deadline === undefined ? undefined : opts.deadline - SYNTHESIS_RESERVE_MS;
 
-  const sections = parts.flatMap((p) => p.sections);
+  const settled = await Promise.all(
+    topics.map(async (topic, i) => {
+      try {
+        const res = await complete({
+          system: SYSTEM,
+          user: fullReviewerTopicPrompt(
+            subject,
+            topic,
+            i + 1,
+            topics.length,
+            opts.materials,
+            opts.language,
+          ),
+          json: true,
+          maxTokens: 4_000,
+          deadline: topicDeadline,
+        });
+        return { parsed: SectionsZ.parse(extractJson(res.text)), servedBy: res.servedBy };
+      } catch (err) {
+        // One weak topic must not sink the whole guide — keep the rest.
+        if (!isRecoverable(err) && !(err instanceof NoProviderAvailable)) throw err;
+        return null;
+      }
+    }),
+  );
+
+  // Keep the buyer's topic order regardless of which call finished first.
+  const parts = settled.filter((r) => r !== null);
+  const servedBy = parts[0]?.servedBy ?? "";
+  const sections = parts.flatMap((p) => p.parsed.sections);
   if (sections.length === 0) return null;
 
   const reviewer: Reviewer = {
@@ -262,12 +279,8 @@ async function generateFullReviewerChunked(
  */
 const MAX_CHUNKED_TOPICS = 4;
 
-/** Time held back from the topic loop so the cross-topic call can still run. */
+/** Time held back from the topic calls so the cross-topic call can still run. */
 const SYNTHESIS_RESERVE_MS = 15_000;
-
-function outOfBudget(deadline: number | undefined, headroom: number): boolean {
-  return deadline !== undefined && Date.now() + headroom >= deadline;
-}
 
 // ─── Mock exam ───────────────────────────────────────────────────────
 
@@ -508,41 +521,7 @@ const STUDY_ANGLES: ((t: string) => Reviewer["sections"][number])[] = [
 ];
 
 /** Study actions, rotated so consecutive scaffold sections don't read identically. */
-const STUDY_ACTIONS: string[][] = [
-  [
-    "Write the definition in your own words, then compare it to your notes",
-    "List its parts or stages in order",
-    "Work through one example end to end",
-  ],
-  [
-    "Say out loud how it works, as if teaching someone",
-    "Note the one step you keep getting wrong",
-    "Find a second example that looks different but follows the same rule",
-  ],
-  [
-    "Draw or diagram it from memory, then check it",
-    "Write down what must be true for it to apply",
-    "Name the topic it is most easily confused with, and the tell that separates them",
-  ],
-  [
-    "Turn the key facts into a three-column table",
-    "Write one exam-style question on it, then answer it",
-    "Mark anything you could not explain without looking",
-  ],
-];
 
-function scaffoldSection(topic: string, index: number): Reviewer["sections"][number] {
-  const t = titleCase(topic);
-  return {
-    heading: t,
-    explanation:
-      `Work through "${t}" in four passes: what it is, why it matters, how it works, and one ` +
-      `worked example. Write each pass down — recalling it onto paper is what makes it stick, ` +
-      `and the gaps you hit are exactly what to revise.`,
-    memoryTrick: `Link the parts of ${t} into a single one-line story, in the order they happen.`,
-    bullets: STUDY_ACTIONS[index % STUDY_ACTIONS.length]!,
-  };
-}
 
 /**
  * Angles a learner can self-test from. Cycling these across the topics keeps the

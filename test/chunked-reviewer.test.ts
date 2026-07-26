@@ -8,6 +8,7 @@ import "./helpers.js";
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { generateReviewer } from "../src/engine/generate.js";
+import { examPack } from "../src/services.js";
 import { cacheClear } from "../src/engine/cache.js";
 import { resetProviderHealth } from "../src/engine/providers.js";
 
@@ -176,5 +177,57 @@ describe("time budget", () => {
     assert.ok(aborted, "a hung provider call must be aborted, not waited on");
     assert.ok(elapsed < 4_000, `took ${elapsed}ms — a hung call was not cut off`);
     assert.equal(result.servedBy, "scaffold");
+  });
+});
+
+describe("concurrency", () => {
+  /** Stub that records how many calls are in flight at once. */
+  function concurrencyProbe(payloadFor: (i: number) => unknown) {
+    let inFlight = 0;
+    let peak = 0;
+    let total = 0;
+    globalThis.fetch = (async () => {
+      const i = total++;
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 30));
+      inFlight--;
+      return reply(payloadFor(i));
+    }) as typeof fetch;
+    return { peak: () => peak, total: () => total };
+  }
+
+  it("fans a multi-topic full reviewer out concurrently, not one topic at a time", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    const probe = concurrencyProbe((i) => (i < 3 ? sectionsFor(`T${i}`, 2) : SYNTHESIS));
+
+    await generateReviewer("full", "Biology: Cells, Genetics, Evolution");
+
+    // 3 topic calls overlap; the synthesis call follows them.
+    assert.equal(probe.peak(), 3, `topics ran ${probe.peak()} at a time — expected all 3 at once`);
+    assert.equal(probe.total(), 4);
+  });
+
+  it("runs the exam pack's generations together and keeps its reviewer to one call", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    const probe = concurrencyProbe(() => ({
+      // A payload that satisfies whichever schema asked for it.
+      ...SYNTHESIS,
+      sections: sectionsFor("Pharmacology", 3).sections,
+      cards: [{ front: "Q", back: "A" }],
+      items: ["Priority one"],
+      questions: [
+        { n: 1, style: "true_false", prompt: "P?", choices: ["True", "False"], answer: "True", why: "w" },
+      ],
+      answers: [{ n: 1, answer: "True", why: "w" }],
+    }));
+
+    await examPack({ exam: "Nursing Board Pharmacology", topics: "Antibiotics, Analgesics" });
+
+    // reviewer + flashcards + mostLikely + mockExam all in flight together.
+    assert.equal(probe.peak(), 4, `exam pack ran ${probe.peak()} at a time — expected 4`);
+    // 4 concurrent + the dependent re-solve. If the reviewer were chunked this
+    // would be 8, which is what made the Exam Pack time out.
+    assert.equal(probe.total(), 5, `exam pack made ${probe.total()} calls — expected 5`);
   });
 });

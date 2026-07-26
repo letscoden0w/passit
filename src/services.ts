@@ -107,7 +107,7 @@ export async function mockExam(input: MockExamInput): Promise<ServiceResult> {
   if (!guard.allowed) return declined(guard.message!);
 
   const style: QuestionStyle = input.style ?? "mixed";
-  const count = resolveQuestionCount(input.count, target);
+  const count = resolveQuestionCount(input.count);
   const opts = genOpts(input.materials, input.language, "mock_exam");
 
   const generated = await generateMockExam(target, style, count, opts);
@@ -131,14 +131,24 @@ export async function examPack(input: ExamPackInput): Promise<ServiceResult> {
   const subject = topics ? `${exam}: ${topics}` : exam;
   const opts = genOpts(input.materials, input.language, "exam_pack");
 
-  // Generated in sequence rather than in parallel: free-tier providers have
-  // tight per-minute limits, and four concurrent calls would trip them.
-  const reviewer = await generateReviewer("full", subject, opts);
-  const cardsGen = await generateFlashcards(subject, opts);
-  const mostLikely = await generateMostLikely(exam, topics || exam, opts);
-  // `subject`, not `exam`: passing the bare exam name left the questions
-  // roaming the whole field instead of the topics the buyer actually paid for.
-  const examGen = await generateMockExam(subject, "mixed", 20, opts);
+  // All four are independent, so they go out together rather than one after
+  // another. Sequentially this was by far the slowest thing PassIt does —
+  // five to nine round trips stacked end to end with the buyer watching a
+  // spinner. Concurrent calls do collide on a provider's per-minute limit,
+  // but the chain fails those over, which spreads the burst across providers
+  // instead of queueing it behind one.
+  //
+  // `chunk: false` holds the reviewer to a single call: here it is one part
+  // of a bundle, not the standalone 6-10 page document Full Reviewer sells.
+  const [reviewer, cardsGen, mostLikely, examGen] = await Promise.all([
+    generateReviewer("full", subject, { ...opts, chunk: false }),
+    generateFlashcards(subject, opts),
+    generateMostLikely(exam, topics || exam, opts),
+    // `subject`, not `exam`: passing the bare exam name left the questions
+    // roaming the whole field instead of the topics the buyer paid for.
+    generateMockExam(subject, "mixed", 20, opts),
+  ]);
+  // The one real dependency: an exam cannot be re-solved before it exists.
   const verified = await verifyExam(examGen.value, opts.deadline);
 
   const cards: Flashcard[] = cardsGen.value.length
@@ -260,9 +270,10 @@ const TIME_BUDGET_MS: Record<ServiceId, number> = {
   explain_this: 30_000,
   quick_reviewer: 45_000,
   mock_exam: 60_000,
-  // Both make several generations, so they get proportionally more.
-  full_reviewer: 90_000,
-  exam_pack: 120_000,
+  // These two make several generations, but concurrently — so the budget
+  // covers the slowest call plus a follow-up, not the sum of every call.
+  full_reviewer: 60_000,
+  exam_pack: 75_000,
 };
 
 function genOpts(
