@@ -33,7 +33,7 @@ function recordAsks() {
 
 afterEach(() => {
   globalThis.fetch = realFetch;
-  delete process.env.GROQ_API_KEY;
+  for (const k of ["GROQ_API_KEY", "GEMINI_API_KEY", "LLM_PROVIDERS"]) delete process.env[k];
   cacheClear();
   resetProviderHealth();
 });
@@ -67,3 +67,58 @@ describe("no request exceeds the provider's token cap", () => {
     }
   });
 });
+
+describe("routing by what a provider can actually serve", () => {
+  it("sends a large request to a big-allowance provider, not the small one", async () => {
+    process.env.GROQ_API_KEY = "k";
+    process.env.GEMINI_API_KEY = "k";
+    const served: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      served.push(String(url).includes("googleapis") ? "gemini" : "groq");
+      return new Response(
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(BIG_EXAM) }] } }],
+          choices: [{ message: { content: JSON.stringify(BIG_EXAM) } }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    // A full-length paper needs more than Groq's free tier serves comfortably.
+    await generateMockExam("Genetics", "multiple_choice", 25, { deadline: Date.now() + 5_000 });
+
+    assert.equal(served[0], "gemini", `large request went to ${served[0]} first`);
+  });
+
+  it("still lets the small fast provider serve a small request", async () => {
+    process.env.GROQ_API_KEY = "k";
+    process.env.GEMINI_API_KEY = "k";
+    process.env.LLM_PROVIDERS = "groq,gemini";
+    const served: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      served.push(String(url).includes("googleapis") ? "gemini" : "groq");
+      return new Response("nope", { status: 500 });
+    }) as typeof fetch;
+
+    // Explain This is small enough for every tier, so preference order wins.
+    await generateReviewer("explain", "Why flip and multiply?", { deadline: Date.now() + 5_000 });
+
+    assert.equal(served[0], "groq", `small request went to ${served[0]} first`);
+    delete process.env.LLM_PROVIDERS;
+  });
+});
+
+const BIG_EXAM = {
+  title: "T",
+  language: "English",
+  questions: [
+    {
+      n: 1,
+      style: "multiple_choice",
+      prompt: "P?",
+      choices: ["A) a", "B) b", "C) c", "D) d"],
+      answer: "A",
+      why: "w",
+    },
+  ],
+};

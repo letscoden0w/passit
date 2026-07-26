@@ -98,8 +98,22 @@ export async function complete(
   chain: ProviderConfig[] = providerChain(),
 ): Promise<CompleteResult> {
   const now = Date.now();
-  const candidates = chain.filter((p) => !isBenched(p.id, now));
-  if (candidates.length === 0) throw new NoProviderAvailable();
+  const available = chain.filter((p) => !isBenched(p.id, now));
+  if (available.length === 0) throw new NoProviderAvailable();
+
+  // Offer the request to providers that can serve it in FULL before those that
+  // would have to truncate it. Free tiers differ enormously — the fastest one
+  // here has roughly a third the allowance of the others — and leading with a
+  // small tier meant its ceiling shaped every service, so an Exam Pack came
+  // back trimmed rather than simply being served by a provider with room.
+  // Order within each group is preserved, so LLM_PROVIDERS still decides
+  // preference among providers that are equally capable.
+  const needed = opts.maxTokens ?? 4096;
+  const candidates = [
+    ...available.filter((p) => p.maxTokensCap >= needed),
+    // Still worth a try rather than falling to the scaffold, just later.
+    ...available.filter((p) => p.maxTokensCap < needed),
+  ];
 
   const errors: string[] = [];
   for (const provider of candidates) {

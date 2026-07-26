@@ -188,11 +188,12 @@ export interface ProviderConfig {
   apiKey: string;
   model: string;
   /**
-   * Upper bound on max_tokens for this provider, as a guard against a caller
-   * asking for something absurd. Deliberately generous: an earlier, tighter
-   * cap was based on a theory that free tiers refuse oversized requests
-   * outright, and that turned out to be wrong — the original code asked Groq
-   * for 8,000 and was served normally. The tight cap only truncated replies.
+   * How large a reply this provider's free tier can comfortably serve.
+   *
+   * Used for routing, not throttling: a request is offered first to providers
+   * that can serve it in full, so a big Exam Pack skips a small-allowance tier
+   * instead of being trimmed to fit it. Anything left over is still tried as a
+   * last resort — a shorter real answer beats the scaffold.
    */
   maxTokensCap: number;
 }
@@ -201,11 +202,13 @@ const PROVIDER_ENV: Record<
   ProviderId,
   { key: string; model: string; fallbackModel: string; cap: number }
 > = {
+  // Fastest of the five, but the smallest free allowance by a wide margin —
+  // so it serves the short services and steps aside for the long ones.
   groq: {
     key: "GROQ_API_KEY",
     model: "GROQ_MODEL",
     fallbackModel: "llama-3.3-70b-versatile",
-    cap: 8_000,
+    cap: 5_000,
   },
   mistral: {
     key: "MISTRAL_API_KEY",
