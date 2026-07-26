@@ -86,13 +86,32 @@ describe("full_reviewer", () => {
     assertPdf(result.deliveries[0], "PassIt-biology-cells-genetics-evolution-Full-Reviewer.pdf");
   });
 
-  it("gives a multi-topic subject one section per topic", async () => {
+  it("covers every topic in a multi-topic subject", async () => {
     const result = await fullReviewer({ topic: "Biology: Cells, Genetics, Evolution", format: "markdown" });
     const md = assertTextFile(result.deliveries[0], "text/markdown");
-    assert.ok(md.includes("## Biology: Cells"));
-    assert.ok(md.includes("## Genetics"));
-    assert.ok(md.includes("## Evolution"));
+    // Assert coverage, not section titles: how a topic is broken down is a
+    // content decision, but every topic the buyer named must appear.
+    for (const topic of ["Cells", "Genetics", "Evolution"]) {
+      assert.ok(md.includes(topic), `missing topic: ${topic}`);
+    }
     assert.ok(md.includes("> **One next step:** Mock Exam — 0.3 USDT"));
+  });
+
+  it("goes deeper than a quick reviewer on the same subject", async () => {
+    const subject = "Biology: Cells, Genetics, Evolution";
+    const [full, quick] = await Promise.all([
+      fullReviewer({ topic: subject, format: "markdown" }),
+      quickReviewer({ topic: subject, format: "markdown" }),
+    ]);
+    const fullMd = assertTextFile(full.deliveries[0], "text/markdown");
+    const quickMd = assertTextFile(quick.deliveries[0], "text/markdown");
+    const sections = (md: string) => (md.match(/^## /gm) ?? []).length;
+
+    assert.ok(
+      sections(fullMd) > sections(quickMd),
+      `full reviewer should have more sections than quick (${sections(fullMd)} vs ${sections(quickMd)})`,
+    );
+    assert.ok(fullMd.length > quickMd.length, "full reviewer should be longer than quick");
   });
 });
 

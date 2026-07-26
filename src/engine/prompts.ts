@@ -62,11 +62,25 @@ export function quickReviewerPrompt(topic: string, materials?: string, language?
     `TOPIC: ${topic}`,
     materialsBlock(materials),
     languageBlock(language),
-    `SIZE: 1-2 pages. Use 1-3 sections. Every hard idea gets a simple explanation, and a memory
-trick where one genuinely helps.`,
-    `RIGHT-SIZE CHECK: if this "topic" is really a whole subject (e.g. "all of Biology"), still
-cover the most important core within 1-2 pages, and note in ataGlance that a Full Reviewer
-would cover it properly.`,
+    `SCOPE: ONE topic, covered properly. This is not a summary or a definition list — it is
+everything a student needs to revise that one topic and answer exam questions on it.
+
+Break the topic into 3-5 SECTIONS — its natural parts, stages, types or sub-ideas. A single
+section is a failure unless the topic is genuinely atomic.
+
+For EVERY section:
+- "explanation": 80-150 words. Say what it is, explain how or why it works, and give a concrete
+  example or worked case. A one-line definition is not an explanation.
+- "memoryTrick": a real mnemonic, analogy or rule of thumb.
+- "table": include one wherever the section has parts, stages, types or contrasts — 3+ rows.
+- "bullets": 2-4 specific facts, exam traps or worked numbers that are NOT restatements of the
+  explanation.
+
+Also give 4-6 "studyFirst" items and 3-5 "quickCheck" questions.
+Target 2-3 pages of finished material.`,
+    `RIGHT-SIZE CHECK: if this "topic" is really a whole subject (e.g. "all of Biology"), cover its
+most important core at full depth rather than thinning everything, and note in ataGlance that a
+Full Reviewer would cover the whole subject.`,
     REVIEWER_SCHEMA,
   ]);
 }

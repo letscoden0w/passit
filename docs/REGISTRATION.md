@@ -135,7 +135,7 @@ MCP tool:      quick_reviewer   (POST https://<your-host>/mcp)
 Required parameter: topic
 
 Description:
-Generates a printable 1-2 page PDF reviewer for one topic: short summary, simple explanations, one memory aid, a key-facts table, a priority list, and 2-3 self-check questions. Study aid only - does not guarantee exam results.
+Generates a printable 2-3 page PDF reviewer for one topic, broken into sections: a summary, simple explanations with worked examples, memory aids, key-facts tables, a priority list, and self-check questions. Study aid only - does not guarantee exam results.
 
 Parameters:
   1. topic

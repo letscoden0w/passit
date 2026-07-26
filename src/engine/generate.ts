@@ -241,23 +241,111 @@ function scaffoldReviewer(kind: ReviewerKind, input: string, opts: GenOptions): 
     };
   }
 
+  // Even the fallback has to honour what each service promises, and a Full
+  // Reviewer must never come out thinner than a Quick Reviewer on the same
+  // input. A Quick Reviewer covers ONE topic from every angle — given a list it
+  // right-sizes rather than ballooning. A Full Reviewer expands per topic, so
+  // it scales with the breadth of the subject.
   const sections =
     kind === "full" && topics.length > 1
-      ? topics.map((topic, i) => scaffoldSection(topic, i))
-      : [scaffoldSection(input, 0)];
+      ? topics.flatMap((topic) =>
+          STUDY_ANGLES.slice(0, 3).map((angle) => angle(titleCase(topic))),
+        )
+      : STUDY_ANGLES.map((angle) => angle(title));
 
   return {
     title: `${title} — ${kind === "full" ? "Full" : "Quick"} Reviewer`,
     language: opts.language ?? "English",
     ataGlance: `${note} This organizes "${title}" into clear, testable pieces.`,
     sections,
-    studyFirst: topics.slice(0, 5).map((t) => `Core idea of ${t}`),
+    studyFirst:
+      topics.length > 1
+        ? topics.slice(0, 6).map((t) => `Core idea of ${titleCase(t)}`)
+        : [
+            `The definition of ${title}, in your own words`,
+            `Why ${title} matters — what depends on it`,
+            `The steps or parts of ${title}, in order`,
+            `One worked example of ${title}`,
+            `The mistake you personally keep making with ${title}`,
+          ],
     quickCheck: [
       { question: `In one line, what is ${title}?`, answer: "Write your answer, then check your notes." },
-      { question: `Name two key parts of ${title}.`, answer: "Write your answer, then check your notes." },
+      { question: `Name the main parts or stages of ${title}.`, answer: "Write your answer, then check your notes." },
+      { question: `Give one example of ${title} and say why it fits.`, answer: "Check your example against your material." },
+      { question: `What is most often confused with ${title}? How do you tell them apart?`, answer: "Write both, side by side." },
     ],
   };
 }
+
+/**
+ * The angles a single topic is studied from. Used when there is only one topic
+ * to cover, so the scaffold still produces a multi-section document.
+ */
+const STUDY_ANGLES: ((t: string) => Reviewer["sections"][number])[] = [
+  (t) => ({
+    heading: `What ${t} is`,
+    explanation:
+      `Write a one-sentence definition of ${t} in your own words — no textbook phrasing. Then list ` +
+      `the words in that sentence you could not explain to someone else, because those are the gaps ` +
+      `that cost marks. Finish by naming the larger topic ${t} belongs to, so you know where it sits.`,
+    memoryTrick: `If you cannot define ${t} in one breath, you do not know it yet.`,
+    bullets: [
+      "Write the definition from memory first, then compare it to your notes",
+      "Underline any word in your definition you could not explain",
+      "Name the broader topic this belongs to",
+    ],
+  }),
+  (t) => ({
+    heading: `Why ${t} matters`,
+    explanation:
+      `Say what ${t} is for, and what would break or change without it. Exam questions rarely ask ` +
+      `you to recite a definition — they ask you to apply it, and applying it means knowing what ` +
+      `job it does. Write down two situations where ${t} decides the outcome.`,
+    memoryTrick: `Ask "what breaks without it?" — the answer is usually the exam question.`,
+    bullets: [
+      "Write two situations where this changes the result",
+      "Note which other topics depend on this one",
+    ],
+  }),
+  (t) => ({
+    heading: `How ${t} works`,
+    explanation:
+      `Break ${t} into its parts, stages or steps and write them in order. For each step, write ` +
+      `what goes in, what happens, and what comes out. If the order matters, say why — that is ` +
+      `usually the part questions target. Draw it if a diagram is clearer than a sentence.`,
+    memoryTrick: `Link the steps into one short story, in the order they happen.`,
+    bullets: [
+      "List the steps or parts in order",
+      "For each: what goes in, what happens, what comes out",
+      "Mark the step you are least sure about",
+    ],
+  }),
+  (t) => ({
+    heading: `A worked example of ${t}`,
+    explanation:
+      `Work one full example end to end, writing every step down rather than doing it in your head. ` +
+      `Then change one detail and redo it — if the method survives the change, you understand it; if ` +
+      `it does not, you had memorised one case rather than learned the idea.`,
+    memoryTrick: `One example done twice beats ten examples read once.`,
+    bullets: [
+      "Do one example fully, writing every step",
+      "Change one number or condition and redo it",
+      "Check the answer is the type the question asked for",
+    ],
+  }),
+  (t) => ({
+    heading: `Common mistakes with ${t}`,
+    explanation:
+      `Write down the errors you actually make with ${t}, not generic ones — mixing it up with a ` +
+      `similar topic, skipping a step, misreading the question, or using the wrong units. Then write ` +
+      `the check that would have caught each one. Those checks are what you run in the exam.`,
+    memoryTrick: `Every mistake you write down is one you are less likely to repeat.`,
+    bullets: [
+      "Name the topic this is most easily confused with, and the tell that separates them",
+      "Write the check that catches your most common slip",
+    ],
+  }),
+];
 
 /** Study actions, rotated so consecutive scaffold sections don't read identically. */
 const STUDY_ACTIONS: string[][] = [
