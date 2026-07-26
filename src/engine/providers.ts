@@ -158,8 +158,8 @@ function shouldBench(err: unknown): boolean {
 }
 
 /** Read a Retry-After header (seconds, or an HTTP date) into milliseconds. */
-function retryAfterMs(res: Response): number | undefined {
-  const raw = res.headers.get("retry-after") ?? res.headers.get("x-ratelimit-reset-tokens");
+function retryAfterMs(headers: Headers): number | undefined {
+  const raw = headers.get("retry-after") ?? headers.get("x-ratelimit-reset-tokens");
   if (!raw) return undefined;
   const trimmed = raw.trim();
 
@@ -206,7 +206,7 @@ async function callOpenAiCompatible(
   provider: ProviderConfig,
   opts: CompleteOptions,
 ): Promise<string> {
-  const res = await fetchWithTimeout(
+  const res = await fetchWithinBudget(
     url,
     {
       method: "POST",
@@ -228,10 +228,10 @@ async function callOpenAiCompatible(
     },
     budgetFor(opts.deadline),
   );
-  if (!res.ok) throw new ProviderError(`${res.status} ${await peek(res)}`, res.status, retryAfterMs(res));
-  const data = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
+  if (!res.ok) {
+    throw new ProviderError(`${res.status} ${peek(res.text)}`, res.status, retryAfterMs(res.headers));
+  }
+  const data = parseJson(res.text) as { choices?: Array<{ message?: { content?: string } }> };
   const text = data.choices?.[0]?.message?.content;
   if (typeof text !== "string") throw new Error("no content in response");
   return text;
@@ -241,7 +241,7 @@ async function callGemini(provider: ProviderConfig, opts: CompleteOptions): Prom
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(provider.model)}` +
     `:generateContent?key=${encodeURIComponent(provider.apiKey)}`;
-  const res = await fetchWithTimeout(
+  const res = await fetchWithinBudget(
     url,
     {
       method: "POST",
@@ -258,8 +258,10 @@ async function callGemini(provider: ProviderConfig, opts: CompleteOptions): Prom
     },
     budgetFor(opts.deadline),
   );
-  if (!res.ok) throw new ProviderError(`${res.status} ${await peek(res)}`, res.status, retryAfterMs(res));
-  const data = (await res.json()) as {
+  if (!res.ok) {
+    throw new ProviderError(`${res.status} ${peek(res.text)}`, res.status, retryAfterMs(res.headers));
+  }
+  const data = parseJson(res.text) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("");
@@ -287,15 +289,35 @@ function budgetFor(deadline: number | undefined): number {
   return Math.max(1_000, Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()));
 }
 
-async function fetchWithTimeout(
+/** A provider reply, already drained, so nothing is left to read untimed. */
+interface ProviderReply {
+  ok: boolean;
+  status: number;
+  headers: Headers;
+  text: string;
+}
+
+/**
+ * Call a provider and read its whole reply inside one timeout.
+ *
+ * `fetch` resolves as soon as the response HEADERS arrive, and a language
+ * model sends those immediately and then streams tokens for as long as
+ * generation takes. Timing only the fetch therefore times the fast part of the
+ * call and leaves the slow part unbounded — a 3s deadline measured 10s in
+ * practice, which is what made every service except the smallest feel slow.
+ * The body is drained under the same signal so the budget covers all of it.
+ */
+async function fetchWithinBudget(
   url: string,
   init: RequestInit,
   timeoutMs = REQUEST_TIMEOUT_MS,
-): Promise<Response> {
+): Promise<ProviderReply> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const text = await res.text();
+    return { ok: res.ok, status: res.status, headers: res.headers, text };
   } catch (err) {
     const e = err as Error;
     throw new Error(e.name === "AbortError" ? "timeout" : e.message);
@@ -304,11 +326,16 @@ async function fetchWithTimeout(
   }
 }
 
-async function peek(res: Response): Promise<string> {
+/** First slice of an error body, for the failover log. */
+function peek(text: string): string {
+  return text.slice(0, 200);
+}
+
+function parseJson(text: string): unknown {
   try {
-    return (await res.text()).slice(0, 200);
+    return JSON.parse(text);
   } catch {
-    return "";
+    throw new Error("provider returned malformed JSON");
   }
 }
 
