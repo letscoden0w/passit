@@ -17,7 +17,9 @@ const RULE = "#e5e7eb";
 export async function blocksToPdf(blocks: Block[], title?: string): Promise<Buffer> {
   const doc = new PDFDocument({
     size: "A4",
-    margins: { top: 62, bottom: 64, left: 54, right: 54 },
+    // Generous top margin: the brand band and its rule live above it, and the
+    // title needs clear air beneath the rule or the page reads as cluttered.
+    margins: { top: 92, bottom: 68, left: 56, right: 56 },
     bufferPages: true,
     info: { Title: title ?? firstHeading(blocks) ?? "PassIt", Author: BRAND.name },
   });
@@ -43,19 +45,19 @@ export async function blocksToPdf(blocks: Block[], title?: string): Promise<Buff
     switch (b.t) {
       case "h1":
         ensure(44);
-        doc.moveDown(0.2);
+        doc.moveDown(0.35);
         doc.font("Helvetica-Bold").fontSize(19).fillColor(INK)
           .text(clean(b.text), left, doc.y, { width });
         accentRule(doc, left);
-        doc.moveDown(0.4);
+        doc.moveDown(0.75);
         break;
 
       case "h2":
         ensure(32);
-        doc.moveDown(0.5);
+        doc.moveDown(0.85);
         doc.font("Helvetica-Bold").fontSize(13.5).fillColor(ACCENT)
           .text(clean(b.text), left, doc.y, { width });
-        doc.moveDown(0.2);
+        doc.moveDown(0.35);
         break;
 
       case "h3":
@@ -118,7 +120,7 @@ function paragraph(
   doc.font("Helvetica").fontSize(10.5).fillColor(INK);
   ensure(Math.min(doc.heightOfString(text, { width }), 110));
   doc.text(text, left, doc.y, { width, align: "left" });
-  doc.moveDown(0.35);
+  doc.moveDown(0.5);
 }
 
 function bullets(
@@ -140,9 +142,9 @@ function bullets(
     const y = doc.y;
     doc.font("Helvetica-Bold").fillColor(ACCENT).text(marker, left, y, { width: indent - 4 });
     doc.font("Helvetica").fillColor(INK).text(item, left + indent, y, { width: textWidth });
-    doc.moveDown(0.15);
+    doc.moveDown(0.2);
   });
-  doc.moveDown(0.2);
+  doc.moveDown(0.35);
 }
 
 function callout(
@@ -177,7 +179,7 @@ function callout(
   doc.fillColor(INK).font("Helvetica").fontSize(10.5)
     .text(text, left + padX, doc.y + 1, { width: inner });
   doc.y = y + boxH;
-  doc.moveDown(0.4);
+  doc.moveDown(0.6);
 }
 
 function table(
@@ -259,9 +261,9 @@ function drawHeader(doc: PDFKit.PDFDocument) {
   const left = doc.page.margins.left;
   const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   doc.font("Helvetica-Bold").fontSize(12.5).fillColor(ACCENT)
-    .text(BRAND.name, left, 26, { continued: true });
-  doc.font("Helvetica").fontSize(8.5).fillColor(MUTED).text(`   ${BRAND.tagline}`);
-  doc.strokeColor(RULE).lineWidth(1).moveTo(left, 44).lineTo(left + width, 44).stroke();
+    .text(BRAND.name, left, 34, { continued: true });
+  doc.font("Helvetica").fontSize(8.5).fillColor(MUTED).text(`    ${BRAND.tagline}`);
+  doc.strokeColor(RULE).lineWidth(1).moveTo(left, 60).lineTo(left + width, 60).stroke();
   doc.y = doc.page.margins.top;
 }
 
