@@ -12,7 +12,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, "..");
 
 const SIZE = 512;
-const BG: RGB = [0x4f, 0x46, 0xe5]; // brand indigo
+const BG: RGB = [0x1e, 0x40, 0xaf]; // brand deep blue
 const FG: RGB = [0xff, 0xff, 0xff];
 
 type RGB = [number, number, number];

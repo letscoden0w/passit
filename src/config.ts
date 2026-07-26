@@ -237,7 +237,16 @@ export const BRAND = {
   tagline: "Type your topic. Get your reviewer.",
   disclaimer:
     "PassIt is a study aid. It is not for use during exams and does not guarantee results.",
-  accent: "#4f46e5",
+  /**
+   * Deep blue rather than indigo. Blue is the shade most consistently
+   * associated with focus and sustained concentration in study contexts, and
+   * it measures 8.7:1 against white — WCAG AAA — where the previous indigo
+   * managed only 6.3:1 (AA). These documents get printed and read for hours,
+   * so readability wins over fashion.
+   */
+  accent: "#1e40af",
+  /** Teal, used only to set memory aids apart — colour as a recall cue. */
+  accentAlt: "#0f766e",
 };
 
 function intFromEnv(name: string, fallback: number): number {

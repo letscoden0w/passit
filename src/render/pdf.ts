@@ -6,10 +6,12 @@ import PDFDocument from "pdfkit";
 import { BRAND } from "../config.js";
 import type { Block } from "./blocks.js";
 
-const INK = "#1a1a2e";
+const INK = "#111827";
 const MUTED = "#6b7280";
-const ACCENT = BRAND.accent;
-const CALLOUT_BG = "#eef2ff";
+const ACCENT = BRAND.accent; // deep blue — headings, table headers
+const ACCENT_ALT = BRAND.accentAlt; // teal — memory aids only
+const CALLOUT_BG = "#eff6ff"; // blue tint
+const CALLOUT_ALT_BG = "#f0fdfa"; // teal tint
 const RULE = "#e5e7eb";
 
 export async function blocksToPdf(blocks: Block[], title?: string): Promise<Buffer> {
@@ -73,7 +75,7 @@ export async function blocksToPdf(blocks: Block[], title?: string): Promise<Buff
         break;
 
       case "callout":
-        callout(doc, clean(b.label), clean(b.text), left, width, ensure);
+        callout(doc, clean(b.label), clean(b.text), left, width, ensure, b.tone === "recall");
         break;
 
       case "table":
@@ -150,10 +152,13 @@ function callout(
   left: number,
   width: number,
   ensure: (n: number) => void,
+  recall = false,
 ) {
   const padX = 10;
   const padY = 8;
   const inner = width - padX * 2;
+  const tint = recall ? CALLOUT_ALT_BG : CALLOUT_BG;
+  const ink = recall ? ACCENT_ALT : ACCENT;
 
   doc.font("Helvetica-Bold").fontSize(9.5);
   const labelH = doc.heightOfString(label, { width: inner });
@@ -163,8 +168,11 @@ function callout(
 
   ensure(boxH + 6);
   const y = doc.y;
-  doc.save().roundedRect(left, y, width, boxH, 6).fill(CALLOUT_BG).restore();
-  doc.fillColor(ACCENT).font("Helvetica-Bold").fontSize(9.5)
+  doc.save().roundedRect(left, y, width, boxH, 6).fill(tint).restore();
+  // A left rule in the accent colour makes the block scannable even when the
+  // page is printed in greyscale, where the tint all but disappears.
+  doc.save().rect(left, y, 3, boxH).fill(ink).restore();
+  doc.fillColor(ink).font("Helvetica-Bold").fontSize(9.5)
     .text(label, left + padX, y + padY, { width: inner });
   doc.fillColor(INK).font("Helvetica").fontSize(10.5)
     .text(text, left + padX, doc.y + 1, { width: inner });

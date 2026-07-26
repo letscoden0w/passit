@@ -10,7 +10,10 @@ export type Block =
   | { t: "p"; text: string }
   | { t: "bullets"; items: string[]; ordered?: boolean }
   | { t: "table"; headers: string[]; rows: string[][]; caption?: string }
-  | { t: "callout"; label: string; text: string }
+  // `tone: "recall"` tints memory aids differently. Colour used as a retrieval
+  // cue is one of the few reliably evidenced study-design wins, so memory
+  // tricks are set apart from ordinary callouts rather than blending in.
+  | { t: "callout"; label: string; text: string; tone?: "default" | "recall" }
   | { t: "divider" };
 
 export const DISCLAIMER = BRAND.disclaimer;
@@ -29,7 +32,9 @@ export function reviewerToBlocks(r: Reviewer, serviceId: ServiceId): Block[] {
   for (const s of r.sections) {
     b.push({ t: "h2", text: s.heading });
     if (s.explanation) b.push({ t: "p", text: s.explanation });
-    if (s.memoryTrick) b.push({ t: "callout", label: "Memory trick", text: s.memoryTrick });
+    if (s.memoryTrick) {
+      b.push({ t: "callout", label: "Memory trick", text: s.memoryTrick, tone: "recall" });
+    }
     if (s.table?.headers?.length) {
       b.push({ t: "table", headers: s.table.headers, rows: s.table.rows, caption: s.table.caption });
     }
