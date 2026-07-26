@@ -1,0 +1,109 @@
+# PassIt — Render Blueprint (https://render.com/docs/blueprint-spec)
+#
+# One free web service. Region singapore: AI API vendors refuse Hong Kong
+# nodes, so do not move this to hongkong.
+#
+# Free instances sleep after ~15 min idle. Point a free uptime pinger
+# (UptimeRobot / cron-job.org) at https://<host>/health every ~10 min to
+# stay awake inside the 750 free instance-hours per month.
+#
+# Values marked `sync: false` are never committed — Render prompts for them
+# when the Blueprint is created, and they live only in the dashboard.
+
+services:
+  - type: web
+    name: passit
+    runtime: node
+    region: singapore
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: node dist/index.js
+    healthCheckPath: /health
+    autoDeploy: true
+
+    envVars:
+      # ─── Runtime ────────────────────────────────────────────────────
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+
+      # ─── Server ─────────────────────────────────────────────────────
+      # The process binds process.env.PORT (src/config.ts SERVER.port),
+      # so this keeps the deployed port identical to local dev.
+      - key: PORT
+        value: 8402
+      # Public HTTPS base URL, e.g. https://passit.onrender.com — it goes
+      # into the x402 challenge resource URL and OKX validates it. Only
+      # known after the service is created, so it is set in the dashboard.
+      - key: PUBLIC_URL
+        sync: false
+
+      # ─── Payments (OKX x402) ────────────────────────────────────────
+      # mock ships as the default so a fresh deploy is safe to smoke-test.
+      # Flip to `live` in the dashboard once PAY_TO_ADDRESS and the OKX
+      # credentials are filled in.
+      - key: PAYMENT_MODE
+        value: mock
+      # xlayer -> eip155:196 (mainnet, what OKX review checks)
+      # xlayer-testnet -> eip155:1952
+      - key: X402_NETWORK
+        value: xlayer
+      # Wait for on-chain confirmation before the file is handed over.
+      - key: OKX_SYNC_SETTLE
+        value: true
+
+      # Receiving wallet + OKX Developer Portal credentials — secrets.
+      # https://web3.okx.com/onchainos/dev-portal
+      - key: PAY_TO_ADDRESS
+        sync: false
+      - key: OKX_API_KEY
+        sync: false
+      - key: OKX_SECRET_KEY
+        sync: false
+      - key: OKX_PASSPHRASE
+        sync: false
+
+      # Settlement token override. Leave blank on mainnet — the X Layer
+      # USDT0 address (0x779ded0c9e1022225f8e0630b35a9b54be713736, 6 dp)
+      # is built into src/config.ts. Required on testnet, whose USDT0
+      # address differs: https://www.okx.com/xlayer/faucet/xlayerfaucet
+      - key: X402_ASSET
+        sync: false
+      - key: X402_ASSET_DECIMALS
+        sync: false
+
+      # ─── Content engine (free LLM tiers, in failover order) ─────────
+      # Any subset works. With no keys set, the built-in deterministic
+      # scaffold still returns a real file to a paying buyer.
+      - key: LLM_PROVIDERS
+        value: groq,mistral,gemini,cerebras
+      - key: PROVIDER_COOLDOWN_MINUTES
+        value: 5
+
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: MISTRAL_MODEL
+        value: mistral-large-latest
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: CEREBRAS_API_KEY
+        sync: false
+      - key: CEREBRAS_MODEL
+        value: llama-3.3-70b
+
+      # ─── Cache ──────────────────────────────────────────────────────
+      # In-memory, keyed by service+topic+language. Cleared on every
+      # restart — expected on a free instance that sleeps.
+      - key: CACHE_ENABLED
+        value: true
+      - key: CACHE_MAX_ENTRIES
+        value: 500
+      - key: CACHE_TTL_MINUTES
+        value: 1440

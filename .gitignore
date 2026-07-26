@@ -1,0 +1,34 @@
+# ─── Dependencies & build output ─────────────────────────────────────
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ─── Secrets ─────────────────────────────────────────────────────────
+# .env holds PAY_TO_ADDRESS, the OKX credentials and the LLM keys.
+.env
+.env.*
+!.env.example
+
+# ─── Generated study material ────────────────────────────────────────
+# `npm run demo` writes PDFs/CSVs here; they are regenerated on demand.
+samples/
+
+# ─── Logs & coverage ─────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+coverage/
+
+# ─── OS / editor cruft ───────────────────────────────────────────────
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+.idea/
+*.swp
+
+# ─── Generated but COMMITTED — never ignore these ────────────────────
+# brand/passit-pfp.png  512x512 1:1 PNG, square corners (OKX review item 3)
+# src/brand.ts          the same PNG inlined, served at /brand/pfp.png
+# Both come from `tsx scripts/make-pfp.ts`, and both must ship in the repo
+# so a clean clone can build and serve the avatar without running it.

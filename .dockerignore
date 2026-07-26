@@ -1,0 +1,45 @@
+# Keep the build context small. The image only needs package*.json,
+# tsconfig.json and src/ — everything else is noise.
+
+# ─── Dependencies & build output (rebuilt inside the image) ──────────
+node_modules/
+dist/
+*.tsbuildinfo
+
+# ─── Secrets — never bake these into a layer ─────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Generated study material ────────────────────────────────────────
+samples/
+
+# ─── Logs & coverage ─────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+coverage/
+
+# ─── VCS, CI, docs, local tooling ────────────────────────────────────
+.git/
+.gitignore
+.github/
+.claude/
+Dockerfile
+.dockerignore
+render.yaml
+README.md
+docs/
+test/
+
+# ─── OS / editor cruft ───────────────────────────────────────────────
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+.idea/
+*.swp
+
+# NOT ignored: src/brand.ts (embedded PFP, required by the build) and
+# brand/passit-pfp.png (committed asset — excluded from the image only by
+# not being COPYed, never by a pattern here).
