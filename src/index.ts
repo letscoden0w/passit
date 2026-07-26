@@ -120,12 +120,18 @@ for (const id of SERVICE_IDS) {
  * Deliver the result. A single file is returned as the raw body so a buyer's
  * agent gets a real PDF; JSON (all files base64) is available for callers that
  * prefer it, and is used automatically when there is more than one file.
+ *
+ * `?download=1` forces the raw body even for multi-file results, returning just
+ * the primary document — handy for opening a result straight in a browser, and
+ * for callers that only want the PDF and would rather not decode base64.
  */
 function sendResult(req: Request, res: Response, id: ServiceId, result: ServiceResult) {
+  const forceDownload = truthy(req.query.download);
   const wantsJson =
-    String(req.query.format ?? "") === "json" ||
-    /application\/json/.test(req.header("accept") ?? "") ||
-    result.deliveries.length > 1;
+    !forceDownload &&
+    (String(req.query.format ?? "") === "json" ||
+      /application\/json/.test(req.header("accept") ?? "") ||
+      result.deliveries.length > 1);
 
   if (result.declined) res.status(422);
 
@@ -147,11 +153,18 @@ function sendResult(req: Request, res: Response, id: ServiceId, result: ServiceR
   }
 
   const file = result.deliveries[0]!;
-  res
-    .set("Content-Type", file.mimeType)
-    .set("Content-Disposition", `attachment; filename="${file.filename}"`)
-    .set("X-PassIt-Summary", encodeURIComponent(result.summary).slice(0, 900))
-    .send(file.bytes);
+  res.set("Content-Type", file.mimeType);
+  res.set("Content-Disposition", `attachment; filename="${file.filename}"`);
+  res.set("X-PassIt-Summary", encodeURIComponent(result.summary).slice(0, 900));
+  // Tell the caller what they didn't get, so a dropped companion file (e.g. the
+  // Exam Pack flashcards CSV) is discoverable rather than silently missing.
+  if (result.deliveries.length > 1) {
+    res.set(
+      "X-PassIt-Other-Files",
+      result.deliveries.slice(1).map((d) => d.filename).join(", "),
+    );
+  }
+  res.send(file.bytes);
 }
 
 // ─── MCP endpoint (stateless) ────────────────────────────────────────
@@ -254,6 +267,12 @@ function num(v: unknown): number | undefined {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string" && v.trim() && Number.isFinite(Number(v))) return Number(v);
   return undefined;
+}
+function truthy(v: unknown): boolean {
+  if (v === undefined || v === null) return false;
+  const s = String(v).trim().toLowerCase();
+  // A bare `?download` arrives as "", which express treats as present.
+  return s === "" || s === "1" || s === "true" || s === "yes" || s === "pdf";
 }
 
 if (process.env.NODE_ENV !== "test") {
