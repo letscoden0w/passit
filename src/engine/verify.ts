@@ -64,7 +64,7 @@ function normalizeMcAnswer(answer: string, choices: string[]): string {
  * Independent re-solve pass. Returns the exam with a corrected answer key when
  * a provider is available; returns the input untouched when none is.
  */
-export async function reSolve(exam: MockExam): Promise<MockExam> {
+export async function reSolve(exam: MockExam, deadline?: number): Promise<MockExam> {
   if (exam.questions.length === 0) return exam;
 
   const compact = exam.questions.map((q) => ({
@@ -80,8 +80,10 @@ export async function reSolve(exam: MockExam): Promise<MockExam> {
       system: "You verify exam answer keys. Return strict JSON only.",
       user: verifyExamPrompt(compact),
       json: true,
-      maxTokens: 4_000,
+      // One line of output per question, plus room for the JSON envelope.
+      maxTokens: Math.min(4_000, 600 + exam.questions.length * 90),
       temperature: 0,
+      deadline,
     });
     const { answers } = extractJson<{ answers: Array<{ n: number; answer: string; why: string }> }>(
       res.text,
@@ -110,6 +112,6 @@ export async function reSolve(exam: MockExam): Promise<MockExam> {
 }
 
 /** Full pipeline used by the Mock Exam and Exam Pack services. */
-export async function verifyExam(exam: MockExam): Promise<MockExam> {
-  return structuralFix(await reSolve(structuralFix(exam)));
+export async function verifyExam(exam: MockExam, deadline?: number): Promise<MockExam> {
+  return structuralFix(await reSolve(structuralFix(exam), deadline));
 }

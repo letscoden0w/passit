@@ -62,7 +62,10 @@ export const LIMITS = {
   materialsMaxChars: 12_000,
   problemMaxChars: 8_000,
   examQuestionsMin: 3,
-  examQuestionsMax: 50,
+  // 40 rather than 50: past roughly this length the model is writing for long
+  // enough that a paper has to be re-solved as well as written inside one HTTP
+  // request, and 40 questions is already a full-length exam.
+  examQuestionsMax: 40,
 };
 
 export function clampText(value: string, max: number): string {

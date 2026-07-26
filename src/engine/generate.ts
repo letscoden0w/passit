@@ -20,6 +20,12 @@ import type { Flashcard, MockExam, QuestionStyle, Reviewer } from "../types.js";
 export interface GenOptions {
   materials?: string;
   language?: string;
+  /**
+   * Absolute epoch-ms cutoff for the whole service call. Threaded into every
+   * provider request so a slow chain degrades to the scaffold instead of
+   * holding the buyer's HTTP request open until the gateway gives up.
+   */
+  deadline?: number;
 }
 
 export interface Generated<T> {
@@ -143,7 +149,7 @@ export async function generateReviewer(
   const maxTokens = kind === "explain" ? 2_000 : kind === "full" ? 6_000 : 4_000;
 
   try {
-    const res = await complete({ system: SYSTEM, user, json: true, maxTokens });
+    const res = await complete({ system: SYSTEM, user, json: true, maxTokens, deadline: opts.deadline });
     const value = repairReviewer(ReviewerZ.parse(extractJson(res.text)) as Reviewer, input, kind);
     if (cacheable) cacheSet(key, value);
     return { value, servedBy: res.servedBy };
@@ -182,6 +188,9 @@ async function generateFullReviewerChunked(
   const parts: { sections: Reviewer["sections"] }[] = [];
   let servedBy = "";
   for (const [i, topic] of topics.entries()) {
+    // Stop early enough to still afford the synthesis call. Covering four
+    // topics and tying them together beats covering five and stopping dead.
+    if (parts.length > 0 && outOfBudget(opts.deadline, SYNTHESIS_RESERVE_MS)) break;
     try {
       const res = await complete({
         system: SYSTEM,
@@ -195,6 +204,7 @@ async function generateFullReviewerChunked(
         ),
         json: true,
         maxTokens: 4_000,
+        deadline: opts.deadline,
       });
       parts.push(SectionsZ.parse(extractJson(res.text)));
       servedBy ||= res.servedBy;
@@ -228,6 +238,7 @@ async function generateFullReviewerChunked(
       ),
       json: true,
       maxTokens: 2_500,
+      deadline: opts.deadline,
     });
     const synth = SynthesisZ.parse(extractJson(res.text));
     reviewer.title = synth.title?.trim() || reviewer.title;
@@ -244,8 +255,19 @@ async function generateFullReviewerChunked(
   return { value: repairReviewer(reviewer, subject, "full"), servedBy: servedBy || "scaffold" };
 }
 
-/** Upper bound on per-topic calls for one Full Reviewer. */
-const MAX_CHUNKED_TOPICS = 6;
+/**
+ * Upper bound on per-topic calls for one Full Reviewer. Each topic is a round
+ * trip to a provider, so this is a latency budget as much as a cost one — a
+ * pasted twelve-topic syllabus would otherwise take minutes to answer.
+ */
+const MAX_CHUNKED_TOPICS = 4;
+
+/** Time held back from the topic loop so the cross-topic call can still run. */
+const SYNTHESIS_RESERVE_MS = 15_000;
+
+function outOfBudget(deadline: number | undefined, headroom: number): boolean {
+  return deadline !== undefined && Date.now() + headroom >= deadline;
+}
 
 // ─── Mock exam ───────────────────────────────────────────────────────
 
@@ -268,7 +290,7 @@ export async function generateMockExam(
     // tiers for far more than a short exam needs, and some of them reject a
     // request whose max_tokens exceeds their per-minute allowance outright.
     const maxTokens = Math.min(8_000, 1_200 + count * 220);
-    const res = await complete({ system: SYSTEM, user, json: true, maxTokens });
+    const res = await complete({ system: SYSTEM, user, json: true, maxTokens, deadline: opts.deadline });
     const parsed = MockExamZ.parse(extractJson(res.text)) as MockExam;
     parsed.questions = parsed.questions.slice(0, count).map((q, i) => ({ ...q, n: i + 1 }));
     if (cacheable) cacheSet(key, parsed);
@@ -287,7 +309,7 @@ export async function generateFlashcards(
 ): Promise<Generated<Flashcard[]>> {
   const user = flashcardsPrompt(subject, opts.materials, opts.language);
   try {
-    const res = await complete({ system: SYSTEM, user, json: true, maxTokens: 4_000 });
+    const res = await complete({ system: SYSTEM, user, json: true, maxTokens: 4_000, deadline: opts.deadline });
     const { cards } = FlashcardsZ.parse(extractJson(res.text));
     return { value: cards.slice(0, 40), servedBy: res.servedBy };
   } catch (err) {
@@ -303,7 +325,7 @@ export async function generateMostLikely(
 ): Promise<Generated<string[]>> {
   const user = mostLikelyPrompt(exam, topics, opts.language);
   try {
-    const res = await complete({ system: SYSTEM, user, json: true, maxTokens: 1_500 });
+    const res = await complete({ system: SYSTEM, user, json: true, maxTokens: 1_500, deadline: opts.deadline });
     const { items } = MostLikelyZ.parse(extractJson(res.text));
     return { value: items.slice(0, 12), servedBy: res.servedBy };
   } catch (err) {

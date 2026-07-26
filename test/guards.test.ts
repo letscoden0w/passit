@@ -136,18 +136,19 @@ describe("resolveQuestionCount", () => {
   });
 
   it("honours an explicit count", () => {
-    assert.equal(resolveQuestionCount(25, "Photosynthesis"), 25);
+    assert.equal(resolveQuestionCount(30, "Photosynthesis"), 30);
     assert.equal(resolveQuestionCount(3, "Photosynthesis"), 3);
-    assert.equal(resolveQuestionCount(50, "Photosynthesis"), 50);
+    assert.equal(resolveQuestionCount(LIMITS.examQuestionsMax, "Photosynthesis"), LIMITS.examQuestionsMax);
   });
 
-  it("clamps to 3..50", () => {
-    assert.equal(LIMITS.examQuestionsMin, 3);
-    assert.equal(LIMITS.examQuestionsMax, 50);
-    assert.equal(resolveQuestionCount(0, "Photosynthesis"), 3);
-    assert.equal(resolveQuestionCount(-40, "Photosynthesis"), 3);
-    assert.equal(resolveQuestionCount(51, "Photosynthesis"), 50);
-    assert.equal(resolveQuestionCount(10_000, "Photosynthesis"), 50);
+  it("clamps to the configured range", () => {
+    const { examQuestionsMin: min, examQuestionsMax: max } = LIMITS;
+    assert.equal(min, 3);
+    assert.equal(max, 40);
+    assert.equal(resolveQuestionCount(0, "Photosynthesis"), min);
+    assert.equal(resolveQuestionCount(-40, "Photosynthesis"), min);
+    assert.equal(resolveQuestionCount(max + 1, "Photosynthesis"), max);
+    assert.equal(resolveQuestionCount(10_000, "Photosynthesis"), max);
   });
 
   it("truncates a fractional count and ignores a non-finite one", () => {

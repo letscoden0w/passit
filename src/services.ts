@@ -74,7 +74,7 @@ export async function quickReviewer(input: ReviewerInput): Promise<ServiceResult
   const guard = checkRequest(topic, input.materials);
   if (!guard.allowed) return declined(guard.message!);
 
-  const opts = genOpts(input.materials, input.language);
+  const opts = genOpts(input.materials, input.language, "quick_reviewer");
   const { value, servedBy } = await generateReviewer("quick", topic, opts);
   return deliverReviewer(value, "quick_reviewer", input.format ?? "pdf", topic, servedBy);
 }
@@ -84,7 +84,7 @@ export async function fullReviewer(input: ReviewerInput): Promise<ServiceResult>
   const guard = checkRequest(subject, input.materials);
   if (!guard.allowed) return declined(guard.message!);
 
-  const opts = genOpts(input.materials, input.language);
+  const opts = genOpts(input.materials, input.language, "full_reviewer");
   const { value, servedBy } = await generateReviewer("full", subject, opts);
   return deliverReviewer(value, "full_reviewer", input.format ?? "pdf", subject, servedBy);
 }
@@ -94,7 +94,7 @@ export async function explainThis(input: ExplainInput): Promise<ServiceResult> {
   const guard = checkRequest(problem, input.materials);
   if (!guard.allowed) return declined(guard.message!);
 
-  const opts = genOpts(input.materials, input.language);
+  const opts = genOpts(input.materials, input.language, "explain_this");
   const { value, servedBy } = await generateReviewer("explain", problem, opts);
   const blocks = reviewerToBlocks(value, "explain_this");
   const deliveries = await renderDoc(blocks, input.format ?? "pdf", slug(problem) || "explain-this", "Explain-This");
@@ -108,10 +108,10 @@ export async function mockExam(input: MockExamInput): Promise<ServiceResult> {
 
   const style: QuestionStyle = input.style ?? "mixed";
   const count = resolveQuestionCount(input.count, target);
-  const opts = genOpts(input.materials, input.language);
+  const opts = genOpts(input.materials, input.language, "mock_exam");
 
   const generated = await generateMockExam(target, style, count, opts);
-  const exam = await verifyExam(generated.value);
+  const exam = await verifyExam(generated.value, opts.deadline);
 
   const blocks = examToBlocks(exam, { withKey: true, serviceId: "mock_exam" });
   const deliveries = await renderDoc(blocks, input.format ?? "pdf", slug(target) || "mock-exam", "Mock-Exam");
@@ -129,7 +129,7 @@ export async function examPack(input: ExamPackInput): Promise<ServiceResult> {
   if (!guard.allowed) return declined(guard.message!);
 
   const subject = topics ? `${exam}: ${topics}` : exam;
-  const opts = genOpts(input.materials, input.language);
+  const opts = genOpts(input.materials, input.language, "exam_pack");
 
   // Generated in sequence rather than in parallel: free-tier providers have
   // tight per-minute limits, and four concurrent calls would trip them.
@@ -139,7 +139,7 @@ export async function examPack(input: ExamPackInput): Promise<ServiceResult> {
   // `subject`, not `exam`: passing the bare exam name left the questions
   // roaming the whole field instead of the topics the buyer actually paid for.
   const examGen = await generateMockExam(subject, "mixed", 20, opts);
-  const verified = await verifyExam(examGen.value);
+  const verified = await verifyExam(examGen.value, opts.deadline);
 
   const cards: Flashcard[] = cardsGen.value.length
     ? cardsGen.value
@@ -246,10 +246,34 @@ function declined(message: string): ServiceResult {
   };
 }
 
-function genOpts(materials: string | undefined, language: string | undefined): GenOptions {
+/**
+ * How long a service may spend talking to providers before it gives up and
+ * delivers what it has.
+ *
+ * A buyer is holding an HTTP request open, and every hosting platform has a
+ * gateway timeout — pass it and they get a 502 instead of the file they paid
+ * for. Without a budget the provider chain can run for many minutes: five
+ * providers, two attempts each, several generations per service. These caps
+ * are what keep the worst case bounded and the request answerable.
+ */
+const TIME_BUDGET_MS: Record<ServiceId, number> = {
+  explain_this: 30_000,
+  quick_reviewer: 45_000,
+  mock_exam: 60_000,
+  // Both make several generations, so they get proportionally more.
+  full_reviewer: 90_000,
+  exam_pack: 120_000,
+};
+
+function genOpts(
+  materials: string | undefined,
+  language: string | undefined,
+  service: ServiceId,
+): GenOptions {
   return {
     materials: materials ? clampText(materials, LIMITS.materialsMaxChars) : undefined,
     language,
+    deadline: Date.now() + TIME_BUDGET_MS[service],
   };
 }
 

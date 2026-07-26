@@ -7,7 +7,7 @@ import "./helpers.js";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { BRAND } from "../src/config.js";
-import { DEFAULT_EXAM_QUESTIONS } from "../src/guards.js";
+import { DEFAULT_EXAM_QUESTIONS, LIMITS } from "../src/guards.js";
 import { examPack, explainThis, fullReviewer, mockExam, quickReviewer } from "../src/services.js";
 import type { ServiceResult } from "../src/types.js";
 import { assertDelivered, assertPdf, assertTextFile } from "./helpers.js";
@@ -140,10 +140,10 @@ describe("mock_exam", () => {
     assert.ok(md.includes("> **One next step:** Explain This — 0.001 USDT"));
   });
 
-  it("clamps an absurd count to the 3..50 range", async () => {
+  it("clamps an absurd count to the configured maximum", async () => {
     const result = await mockExam({ target: "Algebra", count: 500, format: "markdown" });
     const md = assertTextFile(result.deliveries[0], "text/markdown");
-    assert.ok(md.includes("Answer all 50 questions."));
+    assert.ok(md.includes(`Answer all ${LIMITS.examQuestionsMax} questions.`));
   });
 });
 

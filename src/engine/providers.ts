@@ -15,6 +15,12 @@ export interface CompleteOptions {
   json?: boolean;
   maxTokens?: number;
   temperature?: number;
+  /**
+   * Absolute epoch-ms cutoff for this call. Past it we stop trying providers
+   * and let the caller fall back, so a buyer waiting on an HTTP request always
+   * gets an answer rather than a gateway timeout.
+   */
+  deadline?: number;
 }
 
 export interface CompleteResult {
@@ -96,6 +102,11 @@ export async function complete(
 
   const errors: string[] = [];
   for (const provider of candidates) {
+    // Out of time: stop here and let the caller fall back. Marching through
+    // the rest of the chain would only turn a slow response into no response.
+    if (outOfTime(opts.deadline)) {
+      throw new NoProviderAvailable(`Deadline reached — ${errors.join(" | ") || "no attempt completed"}`);
+    }
     // One in-place retry: free tiers meter per minute, so a 429 with a short
     // retry-after is worth waiting out rather than benching the provider for
     // minutes. This is what kept multi-call services (Exam Pack fires four
@@ -113,7 +124,9 @@ export async function complete(
           pe?.status === 429 &&
           attempt === 0 &&
           pe.retryAfterMs !== undefined &&
-          pe.retryAfterMs <= MAX_INLINE_WAIT_MS;
+          pe.retryAfterMs <= MAX_INLINE_WAIT_MS &&
+          // Only worth waiting out if there is time left on the other side.
+          !outOfTime(opts.deadline, pe.retryAfterMs + 5_000);
 
         if (waitable) {
           await sleep(pe!.retryAfterMs! + 250);
@@ -193,24 +206,28 @@ async function callOpenAiCompatible(
   provider: ProviderConfig,
   opts: CompleteOptions,
 ): Promise<string> {
-  const res = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${provider.apiKey}`,
-      ...(provider.id === "openrouter" ? OPENROUTER_HEADERS : {}),
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${provider.apiKey}`,
+        ...(provider.id === "openrouter" ? OPENROUTER_HEADERS : {}),
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        temperature: opts.temperature ?? 0.4,
+        max_tokens: opts.maxTokens ?? 4096,
+        ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+        messages: [
+          { role: "system", content: opts.system },
+          { role: "user", content: opts.user },
+        ],
+      }),
     },
-    body: JSON.stringify({
-      model: provider.model,
-      temperature: opts.temperature ?? 0.4,
-      max_tokens: opts.maxTokens ?? 4096,
-      ...(opts.json ? { response_format: { type: "json_object" } } : {}),
-      messages: [
-        { role: "system", content: opts.system },
-        { role: "user", content: opts.user },
-      ],
-    }),
-  });
+    budgetFor(opts.deadline),
+  );
   if (!res.ok) throw new ProviderError(`${res.status} ${await peek(res)}`, res.status, retryAfterMs(res));
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
@@ -224,19 +241,23 @@ async function callGemini(provider: ProviderConfig, opts: CompleteOptions): Prom
   const url =
     `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(provider.model)}` +
     `:generateContent?key=${encodeURIComponent(provider.apiKey)}`;
-  const res = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: opts.system }] },
-      contents: [{ role: "user", parts: [{ text: opts.user }] }],
-      generationConfig: {
-        temperature: opts.temperature ?? 0.4,
-        maxOutputTokens: opts.maxTokens ?? 4096,
-        ...(opts.json ? { responseMimeType: "application/json" } : {}),
-      },
-    }),
-  });
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: opts.system }] },
+        contents: [{ role: "user", parts: [{ text: opts.user }] }],
+        generationConfig: {
+          temperature: opts.temperature ?? 0.4,
+          maxOutputTokens: opts.maxTokens ?? 4096,
+          ...(opts.json ? { responseMimeType: "application/json" } : {}),
+        },
+      }),
+    },
+    budgetFor(opts.deadline),
+  );
   if (!res.ok) throw new ProviderError(`${res.status} ${await peek(res)}`, res.status, retryAfterMs(res));
   const data = (await res.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
@@ -248,11 +269,31 @@ async function callGemini(provider: ProviderConfig, opts: CompleteOptions): Prom
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-const REQUEST_TIMEOUT_MS = 90_000;
+/**
+ * Ceiling on a single provider call. Free tiers answer in seconds; a call
+ * still open after this is hung, not slow. It was 90s, which meant one stuck
+ * connection could burn the entire request budget on its own.
+ */
+const REQUEST_TIMEOUT_MS = 30_000;
 
-async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
+/** True when `deadline` has passed, optionally requiring `headroom` ms to spare. */
+function outOfTime(deadline: number | undefined, headroom = 0): boolean {
+  return deadline !== undefined && Date.now() + headroom >= deadline;
+}
+
+/** Time left before `deadline`, capped at the per-call ceiling. */
+function budgetFor(deadline: number | undefined): number {
+  if (deadline === undefined) return REQUEST_TIMEOUT_MS;
+  return Math.max(1_000, Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now()));
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (err) {

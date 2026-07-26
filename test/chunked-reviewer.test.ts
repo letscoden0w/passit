@@ -131,3 +131,50 @@ describe("chunked full reviewer", () => {
     assert.equal(result.value.sections.length, 4);
   });
 });
+
+describe("time budget", () => {
+  it("stops calling providers once the deadline has passed", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls++;
+      // Slower than the deadline we allow below.
+      await new Promise((r) => setTimeout(r, 60));
+      return new Response("upstream stalled", { status: 504 });
+    }) as typeof fetch;
+
+    const started = Date.now();
+    const result = await generateReviewer("full", "Biology: Cells, Genetics, Evolution", {
+      deadline: Date.now() + 120,
+    });
+    const elapsed = Date.now() - started;
+
+    // Without a deadline this would march through every provider and attempt.
+    assert.ok(elapsed < 2_000, `took ${elapsed}ms — the deadline was not honoured`);
+    assert.equal(result.servedBy, "scaffold");
+    assert.ok(result.value.sections.length > 0, "buyer must still receive a document");
+    assert.ok(calls >= 1, "should have tried at least once before giving up");
+  });
+
+  it("caps a single provider call at the time remaining", async () => {
+    process.env.GROQ_API_KEY = "test-key";
+    let aborted = false;
+    globalThis.fetch = ((_u: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          aborted = true;
+          const err = new Error("aborted");
+          err.name = "AbortError";
+          reject(err);
+        });
+      })) as typeof fetch;
+
+    const started = Date.now();
+    const result = await generateReviewer("quick", "Photosynthesis", { deadline: Date.now() + 1_100 });
+    const elapsed = Date.now() - started;
+
+    assert.ok(aborted, "a hung provider call must be aborted, not waited on");
+    assert.ok(elapsed < 4_000, `took ${elapsed}ms — a hung call was not cut off`);
+    assert.equal(result.servedBy, "scaffold");
+  });
+});
