@@ -136,7 +136,9 @@ export async function examPack(input: ExamPackInput): Promise<ServiceResult> {
   const reviewer = await generateReviewer("full", subject, opts);
   const cardsGen = await generateFlashcards(subject, opts);
   const mostLikely = await generateMostLikely(exam, topics || exam, opts);
-  const examGen = await generateMockExam(exam, "mixed", 20, opts);
+  // `subject`, not `exam`: passing the bare exam name left the questions
+  // roaming the whole field instead of the topics the buyer actually paid for.
+  const examGen = await generateMockExam(subject, "mixed", 20, opts);
   const verified = await verifyExam(examGen.value);
 
   const cards: Flashcard[] = cardsGen.value.length

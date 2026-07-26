@@ -116,6 +116,90 @@ what you left out in uncertainNotes. Never thin out every topic to fit more in.`
   ]);
 }
 
+/** One topic's worth of sections, for the chunked Full Reviewer below. */
+const SECTIONS_SCHEMA = `Return JSON with exactly this shape:
+{
+  "sections": [
+    {
+      "heading": string,
+      "explanation": string,          // simple words; an analogy where it helps
+      "memoryTrick": string,          // mnemonic or analogy
+      "table": { "caption": string, "headers": [string], "rows": [[string]] },  // optional
+      "bullets": [string]             // optional extra scannable facts
+    }
+  ]
+}`;
+
+/**
+ * One topic of a multi-topic Full Reviewer.
+ *
+ * Asking for a whole subject in a single response makes the model ration its
+ * token budget across every topic at once, so each one lands thin. Handing it
+ * one topic and the full budget is what produces chapter-depth material.
+ */
+export function fullReviewerTopicPrompt(
+  subject: string,
+  topic: string,
+  position: number,
+  total: number,
+  materials?: string,
+  language?: string,
+): string {
+  return join([
+    `You are writing ONE PART of a full study guide. Cover your topic only.`,
+    `WHOLE SUBJECT (context only — the other parts are being written separately): ${subject}`,
+    `YOUR TOPIC (part ${position} of ${total}): ${topic}`,
+    materialsBlock(materials),
+    languageBlock(language),
+    `Break "${topic}" into 3-4 SECTIONS — its natural parts, stages, types or sub-ideas — and
+cover it to the depth of a full study-guide chapter. Do NOT summarise the other parts of the
+subject; another call is covering those.
+
+For EVERY section:
+- "explanation": 100-200 words. Define the idea, explain the mechanism or reasoning step by
+  step, and give a concrete worked example or real case. One or two sentences is a failure.
+- "memoryTrick": a real mnemonic, analogy or rule of thumb.
+- "table": at least 4 rows of substance wherever the section has parts, types, stages or
+  contrasts.
+- "bullets": 3-6 specific facts, common exam traps or worked numbers — never restatements of
+  the explanation.
+
+Every heading must read as part of "${topic}".`,
+    SECTIONS_SCHEMA,
+  ]);
+}
+
+/** The cross-topic material that ties a chunked Full Reviewer together. */
+export function fullReviewerSynthesisPrompt(
+  subject: string,
+  headings: string[],
+  language?: string,
+): string {
+  return join([
+    `A full study guide on the subject below has already been written, section by section.
+Write ONLY the cross-topic material that ties those sections together.`,
+    `SUBJECT: ${subject}`,
+    `SECTIONS ALREADY WRITTEN:\n${headings.map((h) => `- ${h}`).join("\n")}`,
+    languageBlock(language),
+    `- "ataGlance": 2-4 plain lines covering the whole subject.
+- "comparisonTables": 2-3 tables that CONTRAST topics against each other, 4+ rows each.
+  Cross-topic contrasts are where marks are won — never just restate one section.
+- "studyFirst": 6-10 highest-value items, spread across the whole subject.
+- "quickCheck": 6-8 questions with answers, spread across the whole subject rather than
+  clustered on one topic.`,
+    `Return JSON with exactly this shape:
+{
+  "title": string,
+  "language": string,
+  "ataGlance": string,
+  "comparisonTables": [ { "caption": string, "headers": [string], "rows": [[string]] } ],
+  "studyFirst": [string],
+  "quickCheck": [ { "question": string, "answer": string } ],
+  "uncertainNotes": [string]
+}`,
+  ]);
+}
+
 export function explainThisPrompt(problem: string, materials?: string, language?: string): string {
   return join([
     `A learner is stuck. Diagnose and FIX it.`,
@@ -163,6 +247,12 @@ export function mockExamPrompt(
     `RULES:
 - Order questions easy -> hard, the way a real exam warms up.
 - Multiple choice: exactly 4 options, one clearly correct, distractors plausible.
+- VARIETY IS A REQUIREMENT. No two questions may test the same fact, and no more than a
+  quarter of the paper may use the same computation or template. Ten questions that all
+  plug numbers into one formula is a failed exam paper — vary the formula, vary what is
+  solved for, and mix in definitions, applications, comparisons and edge cases.
+- Work across the WHOLE scope given. If several topics were named, every one of them must
+  appear; do not spend the paper on whichever topic you find easiest.
 - SOLVE YOUR OWN TEST: after writing, answer every question from scratch yourself.
   If any question is ambiguous or has two defensible answers, rewrite it.
 - Every answer gets ONE simple line explaining why, in easy words.`,

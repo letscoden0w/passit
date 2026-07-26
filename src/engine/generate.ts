@@ -7,6 +7,8 @@ import {
   SYSTEM,
   quickReviewerPrompt,
   fullReviewerPrompt,
+  fullReviewerTopicPrompt,
+  fullReviewerSynthesisPrompt,
   explainThisPrompt,
   mockExamPrompt,
   flashcardsPrompt,
@@ -55,6 +57,28 @@ const ReviewerZ = z.object({
   uncertainNotes: z.array(z.string()).optional(),
 });
 
+const SectionZ = z.object({
+  heading: z.string().min(1),
+  explanation: z.string().min(1),
+  memoryTrick: z.string().optional(),
+  table: TableZ.optional(),
+  bullets: z.array(z.string()).optional(),
+});
+
+/** One topic's slice of a chunked Full Reviewer. */
+const SectionsZ = z.object({ sections: z.array(SectionZ).min(1) });
+
+/** The cross-topic pass over an already-written chunked Full Reviewer. */
+const SynthesisZ = z.object({
+  title: z.string().optional(),
+  language: z.string().optional(),
+  ataGlance: z.string().optional(),
+  comparisonTables: z.array(TableZ).optional(),
+  studyFirst: z.array(z.string()).optional(),
+  quickCheck: z.array(z.object({ question: z.string(), answer: z.string() })).optional(),
+  uncertainNotes: z.array(z.string()).optional(),
+});
+
 const MockExamZ = z.object({
   title: z.string().min(1),
   language: z.string().default("English"),
@@ -96,6 +120,17 @@ export async function generateReviewer(
     if (hit) return { value: hit, servedBy: "cache" };
   }
 
+  // A multi-topic Full Reviewer is generated topic by topic — see
+  // generateFullReviewerChunked for why one big call cannot do the job.
+  if (kind === "full" && splitTopics(input).length > 1) {
+    const chunked = await generateFullReviewerChunked(input, opts);
+    if (chunked) {
+      if (cacheable) cacheSet(key, chunked.value);
+      return chunked;
+    }
+    // Every topic call failed; fall through to the single-call path below.
+  }
+
   const user =
     kind === "quick"
       ? quickReviewerPrompt(input, opts.materials, opts.language)
@@ -105,11 +140,11 @@ export async function generateReviewer(
 
   // Explain This is priced at 0.001 USDT, so its generation is capped
   // tighter than the others — enough for a real fix, not an essay.
-  const maxTokens = kind === "explain" ? 2_000 : kind === "full" ? 8_000 : 4_000;
+  const maxTokens = kind === "explain" ? 2_000 : kind === "full" ? 6_000 : 4_000;
 
   try {
     const res = await complete({ system: SYSTEM, user, json: true, maxTokens });
-    const value = repairReviewer(ReviewerZ.parse(extractJson(res.text)) as Reviewer, input);
+    const value = repairReviewer(ReviewerZ.parse(extractJson(res.text)) as Reviewer, input, kind);
     if (cacheable) cacheSet(key, value);
     return { value, servedBy: res.servedBy };
   } catch (err) {
@@ -121,6 +156,96 @@ export async function generateReviewer(
     return { value: scaffoldReviewer(kind, input, opts), servedBy: "scaffold" };
   }
 }
+
+/**
+ * Build a multi-topic Full Reviewer one topic at a time.
+ *
+ * A whole subject does not fit in one model response. Asking for it in a
+ * single call fails two ways at once: the JSON runs past the token ceiling and
+ * truncates mid-object (which lands the buyer on the scaffold), and even when
+ * it does fit, the model rations its budget across every topic and returns a
+ * thin section each. Per-topic calls fix both — each one is small enough for a
+ * free tier's per-request ceiling and free to go to chapter depth.
+ *
+ * A short final call writes the cross-topic material, which is the one thing
+ * the per-topic calls genuinely cannot see.
+ *
+ * Returns null only if every topic failed, so the caller can fall back.
+ */
+async function generateFullReviewerChunked(
+  subject: string,
+  opts: GenOptions,
+): Promise<Generated<Reviewer> | null> {
+  // Bounded so a pasted 12-topic syllabus cannot fan out into 12 paid calls.
+  const topics = splitTopics(subject).slice(0, MAX_CHUNKED_TOPICS);
+
+  const parts: { sections: Reviewer["sections"] }[] = [];
+  let servedBy = "";
+  for (const [i, topic] of topics.entries()) {
+    try {
+      const res = await complete({
+        system: SYSTEM,
+        user: fullReviewerTopicPrompt(
+          subject,
+          topic,
+          i + 1,
+          topics.length,
+          opts.materials,
+          opts.language,
+        ),
+        json: true,
+        maxTokens: 4_000,
+      });
+      parts.push(SectionsZ.parse(extractJson(res.text)));
+      servedBy ||= res.servedBy;
+    } catch (err) {
+      // One weak topic must not sink the whole guide — keep what we have.
+      if (!isRecoverable(err) && !(err instanceof NoProviderAvailable)) throw err;
+    }
+  }
+
+  const sections = parts.flatMap((p) => p.sections);
+  if (sections.length === 0) return null;
+
+  const reviewer: Reviewer = {
+    title: titleCase(subject),
+    language: opts.language || "English",
+    ataGlance: "",
+    sections,
+    studyFirst: [],
+    quickCheck: [],
+  };
+
+  // Cross-topic material. Its failure is survivable: repairReviewer fills the
+  // gaps from the sections we already have rather than losing the document.
+  try {
+    const res = await complete({
+      system: SYSTEM,
+      user: fullReviewerSynthesisPrompt(
+        subject,
+        sections.map((s) => s.heading),
+        opts.language,
+      ),
+      json: true,
+      maxTokens: 2_500,
+    });
+    const synth = SynthesisZ.parse(extractJson(res.text));
+    reviewer.title = synth.title?.trim() || reviewer.title;
+    reviewer.language = synth.language?.trim() || reviewer.language;
+    reviewer.ataGlance = synth.ataGlance ?? "";
+    reviewer.comparisonTables = synth.comparisonTables;
+    reviewer.studyFirst = synth.studyFirst ?? [];
+    reviewer.quickCheck = synth.quickCheck ?? [];
+    reviewer.uncertainNotes = synth.uncertainNotes;
+  } catch (err) {
+    if (!isRecoverable(err) && !(err instanceof NoProviderAvailable)) throw err;
+  }
+
+  return { value: repairReviewer(reviewer, subject, "full"), servedBy: servedBy || "scaffold" };
+}
+
+/** Upper bound on per-topic calls for one Full Reviewer. */
+const MAX_CHUNKED_TOPICS = 6;
 
 // ─── Mock exam ───────────────────────────────────────────────────────
 
@@ -139,7 +264,11 @@ export async function generateMockExam(
 
   const user = mockExamPrompt(target, style, count, opts.materials, opts.language);
   try {
-    const res = await complete({ system: SYSTEM, user, json: true, maxTokens: 8_000 });
+    // Scale the ceiling to the paper being asked for. A flat 8,000 asks free
+    // tiers for far more than a short exam needs, and some of them reject a
+    // request whose max_tokens exceeds their per-minute allowance outright.
+    const maxTokens = Math.min(8_000, 1_200 + count * 220);
+    const res = await complete({ system: SYSTEM, user, json: true, maxTokens });
     const parsed = MockExamZ.parse(extractJson(res.text)) as MockExam;
     parsed.questions = parsed.questions.slice(0, count).map((q, i) => ({ ...q, n: i + 1 }));
     if (cacheable) cacheSet(key, parsed);
@@ -186,7 +315,7 @@ export async function generateMostLikely(
 // ─── Repair & fallbacks ──────────────────────────────────────────────
 
 /** Fix up small model slips rather than failing a paid request. */
-function repairReviewer(r: Reviewer, input: string): Reviewer {
+function repairReviewer(r: Reviewer, input: string, kind: ReviewerKind = "quick"): Reviewer {
   if (!r.title.trim()) r.title = titleCase(input);
   r.sections = r.sections.filter((s) => s.heading?.trim() && s.explanation?.trim());
   if (r.sections.length === 0) {
@@ -198,8 +327,17 @@ function repairReviewer(r: Reviewer, input: string): Reviewer {
   if (r.comparisonTables) {
     r.comparisonTables = r.comparisonTables.map(repairTable).filter((t) => t.rows.length > 0);
   }
-  r.studyFirst = (r.studyFirst ?? []).filter((x) => x.trim()).slice(0, 8);
-  r.quickCheck = (r.quickCheck ?? []).filter((q) => q.question?.trim()).slice(0, 5);
+  // A Full Reviewer spans a whole subject, so it is allowed a longer priority
+  // list and self-check than a single-topic reviewer. Capping both at the
+  // quick-reviewer size was silently trimming material the buyer paid for.
+  const full = kind === "full";
+  r.studyFirst = (r.studyFirst ?? []).filter((x) => x.trim()).slice(0, full ? 10 : 8);
+  r.quickCheck = (r.quickCheck ?? []).filter((q) => q.question?.trim()).slice(0, full ? 8 : 5);
+  // The chunked path writes sections first and the overview second, so an
+  // overview that never arrived is backfilled rather than left blank.
+  if (!r.ataGlance?.trim()) {
+    r.ataGlance = `This reviewer covers ${titleCase(input)} across ${r.sections.length} sections.`;
+  }
   return r;
 }
 
@@ -454,9 +592,20 @@ function truncate(s: string, n: number): string {
 }
 
 function splitTopics(input: string): string[] {
-  return input
+  // "Biology: Cells, Genetics, Evolution" — what precedes the colon names the
+  // whole subject, not the first topic. Without stripping it the first topic
+  // comes back as "Biology: Cells" and every heading under it is mislabelled.
+  // Only strip when the prefix is a clean label and a real list follows.
+  const labelled = input.match(/^\s*([^:,;\n]{2,60}):\s*(\S[\s\S]*)$/);
+  const body = labelled?.[2] ?? input;
+  const topics = splitOnSeparators(body);
+  return topics.length > 1 ? topics : splitOnSeparators(input);
+}
+
+function splitOnSeparators(s: string): string[] {
+  return s
     .split(/[,;\n•]|\band\b/gi)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 1)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 1)
     .slice(0, 12);
 }

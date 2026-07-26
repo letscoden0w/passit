@@ -8,7 +8,13 @@
 import assert from "node:assert/strict";
 import type { Delivery, ServiceResult } from "../src/types.js";
 
-const PROVIDER_KEYS = ["GROQ_API_KEY", "MISTRAL_API_KEY", "GEMINI_API_KEY", "CEREBRAS_API_KEY"];
+const PROVIDER_KEYS = [
+  "GROQ_API_KEY",
+  "MISTRAL_API_KEY",
+  "GEMINI_API_KEY",
+  "CEREBRAS_API_KEY",
+  "OPENROUTER_API_KEY",
+];
 
 // Network overrides too: a developer's local .env must not change what the
 // pricing assertions see.

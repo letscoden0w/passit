@@ -3,7 +3,13 @@
 import "./helpers.js";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { LIMITS, checkRequest, clampText, resolveQuestionCount } from "../src/guards.js";
+import {
+  DEFAULT_EXAM_QUESTIONS,
+  LIMITS,
+  checkRequest,
+  clampText,
+  resolveQuestionCount,
+} from "../src/guards.js";
 import { fullReviewer, mockExam, quickReviewer } from "../src/services.js";
 import { assertDelivered } from "./helpers.js";
 
@@ -115,16 +121,18 @@ describe("services decline guarded requests", () => {
 });
 
 describe("resolveQuestionCount", () => {
-  it("defaults to 10 for a single topic", () => {
-    assert.equal(resolveQuestionCount(undefined, "Photosynthesis"), 10);
-    assert.equal(resolveQuestionCount(undefined, "Newton's Laws"), 10);
-  });
-
-  it("defaults to 20 for a multi-topic target", () => {
-    assert.equal(resolveQuestionCount(undefined, "Photosynthesis, Respiration"), 20);
-    assert.equal(resolveQuestionCount(undefined, "Cells and Genetics"), 20);
-    assert.equal(resolveQuestionCount(undefined, "Algebra; Geometry; Trigonometry"), 20);
-    assert.equal(resolveQuestionCount(undefined, "Acids\nBases"), 20);
+  it("defaults to a full 25-question paper regardless of topic shape", () => {
+    for (const target of [
+      "Photosynthesis",
+      "Newton's Laws",
+      "Photosynthesis, Respiration",
+      "Cells and Genetics",
+      "Algebra; Geometry; Trigonometry",
+      "Acids\nBases",
+    ]) {
+      assert.equal(resolveQuestionCount(undefined, target), DEFAULT_EXAM_QUESTIONS, target);
+    }
+    assert.equal(DEFAULT_EXAM_QUESTIONS, 25);
   });
 
   it("honours an explicit count", () => {
@@ -144,8 +152,11 @@ describe("resolveQuestionCount", () => {
 
   it("truncates a fractional count and ignores a non-finite one", () => {
     assert.equal(resolveQuestionCount(12.9, "Photosynthesis"), 12);
-    assert.equal(resolveQuestionCount(Number.NaN, "Photosynthesis"), 10);
-    assert.equal(resolveQuestionCount(Number.POSITIVE_INFINITY, "Photosynthesis, Respiration"), 20);
+    assert.equal(resolveQuestionCount(Number.NaN, "Photosynthesis"), DEFAULT_EXAM_QUESTIONS);
+    assert.equal(
+      resolveQuestionCount(Number.POSITIVE_INFINITY, "Photosynthesis, Respiration"),
+      DEFAULT_EXAM_QUESTIONS,
+    );
   });
 });
 

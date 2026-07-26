@@ -70,11 +70,15 @@ export function clampText(value: string, max: number): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-/** Default question count: 20, or 10 for a single small topic. */
+/**
+ * Default question count: 25 — a full practice paper, not a warm-up.
+ * An explicit `count` always wins, clamped to the 3..50 range.
+ */
 export function resolveQuestionCount(requested: number | undefined, target: string): number {
   if (requested !== undefined && Number.isFinite(requested)) {
     return Math.max(LIMITS.examQuestionsMin, Math.min(LIMITS.examQuestionsMax, Math.trunc(requested)));
   }
-  const looksLikeOneTopic = target.split(/[,;\n]|\band\b/i).filter((s) => s.trim()).length <= 1;
-  return looksLikeOneTopic ? 10 : 20;
+  return DEFAULT_EXAM_QUESTIONS;
 }
+
+export const DEFAULT_EXAM_QUESTIONS = 25;

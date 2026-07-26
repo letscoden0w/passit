@@ -7,6 +7,7 @@ import "./helpers.js";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { BRAND } from "../src/config.js";
+import { DEFAULT_EXAM_QUESTIONS } from "../src/guards.js";
 import { examPack, explainThis, fullReviewer, mockExam, quickReviewer } from "../src/services.js";
 import type { ServiceResult } from "../src/types.js";
 import { assertDelivered, assertPdf, assertTextFile } from "./helpers.js";
@@ -116,11 +117,11 @@ describe("full_reviewer", () => {
 });
 
 describe("mock_exam", () => {
-  it("defaults a single topic to 10 questions", async () => {
+  it("defaults to a full 25-question paper", async () => {
     const result = await mockExam({ target: "Newton's Laws" });
     assertPdf(result.deliveries[0], "PassIt-newtons-laws-Mock-Exam.pdf");
     assert.ok(
-      result.summary.startsWith("10-question mixed practice test"),
+      result.summary.startsWith(`${DEFAULT_EXAM_QUESTIONS}-question mixed practice test`),
       `unexpected summary: ${result.summary}`,
     );
   });
