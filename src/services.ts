@@ -158,7 +158,7 @@ export async function examPack(input: ExamPackInput): Promise<ServiceResult> {
   // `chunk: false` holds the reviewer to a single call: here it is one part
   // of a bundle, not the standalone 6-10 page document Full Reviewer sells.
   const [reviewer, cardsGen, mostLikely, examGen] = await Promise.all([
-    generateReviewer("full", subject, { ...opts, chunk: false }),
+    generateReviewer("full", subject, opts),
     generateFlashcards(subject, opts),
     generateMostLikely(exam, topics || exam, opts),
     // `subject`, not `exam`: passing the bare exam name left the questions
@@ -302,14 +302,11 @@ function declined(message: string): ServiceResult {
  * floor is around 30s and the ceiling is the host's gateway timeout.
  */
 const TIME_BUDGET_MS: Record<ServiceId, number> = {
-  // Smallest output (2,000 tokens), so it needs the least.
-  explain_this: 20_000,
-  quick_reviewer: 32_000,
-  mock_exam: 40_000,
-  // These two make several generations, but concurrently — so the budget
-  // covers the slowest call plus a follow-up, not the sum of every call.
-  full_reviewer: 40_000,
-  exam_pack: 45_000,
+  explain_this: 45_000,
+  quick_reviewer: 45_000,
+  mock_exam: 60_000,
+  full_reviewer: 60_000,
+  exam_pack: 60_000,
 };
 
 /**
@@ -318,7 +315,7 @@ const TIME_BUDGET_MS: Record<ServiceId, number> = {
  * off); raise it if responses come back "scaffold" while the providers are
  * healthy (generations are being cut off before they finish).
  */
-const MAX_BUDGET_MS = Math.max(5_000, Number(process.env.MAX_REQUEST_SECONDS ?? 45) * 1_000);
+const MAX_BUDGET_MS = Math.max(5_000, Number(process.env.MAX_REQUEST_SECONDS ?? 60) * 1_000);
 
 /** The effective budget for a service, after the global ceiling is applied. */
 export function serviceBudgetMs(service: ServiceId): number {

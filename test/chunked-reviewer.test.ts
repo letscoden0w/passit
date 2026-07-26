@@ -1,9 +1,11 @@
-// The chunked Full Reviewer.
+// The chunked Full Reviewer — opt-in via `chunk: true`.
 //
-// Unlike the rest of the suite, these tests DO exercise the provider path —
-// with `fetch` stubbed, so still no network. That is the point: the chunked
-// path only runs when a provider is configured, so the scaffold-based tests
-// elsewhere can never reach it.
+// Chunking produces a deeper document but costs one round trip per topic, and
+// that latency dominated the wall clock, so it is off by default. These tests
+// pin the behaviour for when it is asked for.
+//
+// Unlike the rest of the suite they DO exercise the provider path, with
+// `fetch` stubbed so still no network.
 import "./helpers.js";
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -74,7 +76,9 @@ describe("chunked full reviewer", () => {
     process.env.GROQ_API_KEY = "test-key";
     const stub = stubProvider(3);
 
-    const result = await generateReviewer("full", "Biology: Cells, Genetics, Evolution");
+    const result = await generateReviewer("full", "Biology: Cells, Genetics, Evolution", {
+      chunk: true,
+    });
 
     // 3 topics + 1 synthesis.
     assert.equal(stub.calls(), 4);
@@ -97,7 +101,7 @@ describe("chunked full reviewer", () => {
     process.env.GROQ_API_KEY = "test-key";
     stubProvider(2, { failSynthesis: true });
 
-    const result = await generateReviewer("full", "Chemistry: Acids, Bases");
+    const result = await generateReviewer("full", "Chemistry: Acids, Bases", { chunk: true });
 
     assert.equal(result.value.sections.length, 6);
     assert.notEqual(result.servedBy, "scaffold");
@@ -109,7 +113,7 @@ describe("chunked full reviewer", () => {
     process.env.GROQ_API_KEY = "test-key";
     globalThis.fetch = (async () => new Response("nope", { status: 500 })) as typeof fetch;
 
-    const result = await generateReviewer("full", "Physics: Motion, Energy");
+    const result = await generateReviewer("full", "Physics: Motion, Energy", { chunk: true });
 
     assert.equal(result.servedBy, "scaffold");
     assert.ok(result.value.sections.length > 0, "scaffold must still produce sections");
@@ -125,7 +129,7 @@ describe("chunked full reviewer", () => {
       return reply({ ...SYNTHESIS, sections: sectionsFor("Photosynthesis", 4).sections });
     }) as typeof fetch;
 
-    const result = await generateReviewer("full", "Photosynthesis");
+    const result = await generateReviewer("full", "Photosynthesis", { chunk: true });
 
     assert.equal(stub.prompts.length, 1, "a single topic must not fan out");
     assert.match(stub.prompts[0], /Make a FULL REVIEWER/);
@@ -147,6 +151,7 @@ describe("time budget", () => {
     const started = Date.now();
     const result = await generateReviewer("full", "Biology: Cells, Genetics, Evolution", {
       deadline: Date.now() + 120,
+      chunk: true,
     });
     const elapsed = Date.now() - started;
 
@@ -201,7 +206,7 @@ describe("concurrency", () => {
     process.env.GROQ_API_KEY = "test-key";
     const probe = concurrencyProbe((i) => (i < 3 ? sectionsFor(`T${i}`, 2) : SYNTHESIS));
 
-    await generateReviewer("full", "Biology: Cells, Genetics, Evolution");
+    await generateReviewer("full", "Biology: Cells, Genetics, Evolution", { chunk: true });
 
     // 3 topic calls overlap; the synthesis call follows them.
     assert.equal(probe.peak(), 3, `topics ran ${probe.peak()} at a time — expected all 3 at once`);
@@ -224,12 +229,11 @@ describe("concurrency", () => {
 
     await examPack({ exam: "Nursing Board Pharmacology", topics: "Antibiotics, Analgesics" });
 
-    // reviewer + flashcards + mostLikely + two exam batches, all in flight at
-    // once. The 20-question exam is split so no single call asks for a
-    // max_tokens ceiling above what a free tier will accept.
-    assert.equal(probe.peak(), 5, `exam pack ran ${probe.peak()} at a time — expected 5`);
-    // 5 concurrent + the dependent re-solve. Were the reviewer chunked as well
-    // this would be 9 sequential calls, which is what made it time out.
-    assert.equal(probe.total(), 6, `exam pack made ${probe.total()} calls — expected 6`);
+    // reviewer + flashcards + mostLikely + exam, all in flight at once. One
+    // call each: the reviewer is unchunked and the exam unbatched, because
+    // extra round trips cost more wall clock than they bought in depth.
+    assert.equal(probe.peak(), 4, `exam pack ran ${probe.peak()} at a time — expected 4`);
+    // 4 concurrent + the dependent re-solve.
+    assert.equal(probe.total(), 5, `exam pack made ${probe.total()} calls — expected 5`);
   });
 });

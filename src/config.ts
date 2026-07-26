@@ -188,15 +188,11 @@ export interface ProviderConfig {
   apiKey: string;
   model: string;
   /**
-   * Largest max_tokens this provider will accept without tripping its own
-   * per-minute limit.
-   *
-   * Free tiers reserve against the max_tokens you ASK for, not what you end up
-   * using — so a request whose ceiling exceeds the per-minute allowance is
-   * refused before a single token is generated, no matter how short the reply
-   * would have been. Groq's free allowance is about 6,000 tokens/minute, which
-   * is why a 25-question exam asking for 6,700 was rejected every single time
-   * while a 2,000-token Explain This always succeeded.
+   * Upper bound on max_tokens for this provider, as a guard against a caller
+   * asking for something absurd. Deliberately generous: an earlier, tighter
+   * cap was based on a theory that free tiers refuse oversized requests
+   * outright, and that turned out to be wrong — the original code asked Groq
+   * for 8,000 and was served normally. The tight cap only truncated replies.
    */
   maxTokensCap: number;
 }
@@ -205,13 +201,11 @@ const PROVIDER_ENV: Record<
   ProviderId,
   { key: string; model: string; fallbackModel: string; cap: number }
 > = {
-  // 6,000 tokens/minute free. Held under it with room for the prompt, which
-  // also counts toward the same allowance.
   groq: {
     key: "GROQ_API_KEY",
     model: "GROQ_MODEL",
     fallbackModel: "llama-3.3-70b-versatile",
-    cap: 3_500,
+    cap: 8_000,
   },
   mistral: {
     key: "MISTRAL_API_KEY",
@@ -239,8 +233,7 @@ const PROVIDER_ENV: Record<
     key: "OPENROUTER_API_KEY",
     model: "OPENROUTER_MODEL",
     fallbackModel: "openrouter/free",
-    // The auto-router may land on any free model, so assume a modest ceiling.
-    cap: 4_000,
+    cap: 8_000,
   },
 };
 
