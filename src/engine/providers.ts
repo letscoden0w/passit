@@ -271,10 +271,10 @@ async function callGemini(provider: ProviderConfig, opts: CompleteOptions): Prom
 
 /**
  * Ceiling on a single provider call. Free tiers answer in seconds; a call
- * still open after this is hung, not slow. It was 90s, which meant one stuck
- * connection could burn the entire request budget on its own.
+ * still open after this is hung, not slow. Kept well under the smallest
+ * service budget so one stuck connection cannot consume the whole request.
  */
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 18_000;
 
 /** True when `deadline` has passed, optionally requiring `headroom` ms to spare. */
 function outOfTime(deadline: number | undefined, headroom = 0): boolean {

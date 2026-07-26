@@ -232,10 +232,22 @@ app.get("/", (_req, res) => {
   });
 });
 
+/**
+ * Which build is actually serving. Without this there is no way to tell a code
+ * problem from a deploy that never landed — you end up debugging source that
+ * is not running. Railway injects the commit SHA; other hosts can set
+ * GIT_COMMIT, and the boot time alone still shows whether a restart happened.
+ */
+const BUILD = {
+  commit: (process.env.RAILWAY_GIT_COMMIT_SHA ?? process.env.GIT_COMMIT ?? "unknown").slice(0, 7),
+  bootedAt: new Date().toISOString(),
+};
+
 app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     ts: new Date().toISOString(),
+    build: BUILD,
     payment: cfg.mode,
     network: cfg.network.caip2,
     providers: providerHealth(),

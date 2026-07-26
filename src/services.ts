@@ -260,21 +260,31 @@ function declined(message: string): ServiceResult {
  * How long a service may spend talking to providers before it gives up and
  * delivers what it has.
  *
- * A buyer is holding an HTTP request open, and every hosting platform has a
- * gateway timeout — pass it and they get a 502 instead of the file they paid
- * for. Without a budget the provider chain can run for many minutes: five
- * providers, two attempts each, several generations per service. These caps
- * are what keep the worst case bounded and the request answerable.
+ * Read these as "how long the buyer stares at a spinner in the worst case",
+ * not "how long we are allowed to keep trying" — when providers are slow the
+ * budget IS the response time, and it was measured at 45s for a Quick
+ * Reviewer, which is past the gateway timeout on common hosts and far past
+ * what anyone will wait. Nothing here may exceed MAX_BUDGET_MS.
+ *
+ * The healthy path is unaffected: a free tier that is working answers in a
+ * few seconds and never comes near these.
  */
 const TIME_BUDGET_MS: Record<ServiceId, number> = {
-  explain_this: 30_000,
-  quick_reviewer: 45_000,
-  mock_exam: 60_000,
+  explain_this: 12_000,
+  quick_reviewer: 15_000,
+  mock_exam: 22_000,
   // These two make several generations, but concurrently — so the budget
   // covers the slowest call plus a follow-up, not the sum of every call.
-  full_reviewer: 60_000,
-  exam_pack: 75_000,
+  full_reviewer: 22_000,
+  exam_pack: 25_000,
 };
+
+/**
+ * Hard ceiling on any service's budget. The default leaves headroom under a
+ * 30s gateway timeout; raise it on a host that allows longer requests, or drop
+ * it if 502s appear, without touching the per-service numbers above.
+ */
+const MAX_BUDGET_MS = Math.max(5_000, Number(process.env.MAX_REQUEST_SECONDS ?? 25) * 1_000);
 
 function genOpts(
   materials: string | undefined,
@@ -284,7 +294,7 @@ function genOpts(
   return {
     materials: materials ? clampText(materials, LIMITS.materialsMaxChars) : undefined,
     language,
-    deadline: Date.now() + TIME_BUDGET_MS[service],
+    deadline: Date.now() + Math.min(TIME_BUDGET_MS[service], MAX_BUDGET_MS),
   };
 }
 
