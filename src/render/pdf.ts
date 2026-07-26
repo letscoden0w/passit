@@ -14,14 +14,32 @@ const CALLOUT_BG = "#eff6ff"; // blue tint
 const CALLOUT_ALT_BG = "#f0fdfa"; // teal tint
 const RULE = "#e5e7eb";
 
-export async function blocksToPdf(blocks: Block[], title?: string): Promise<Buffer> {
+export async function blocksToPdf(
+  blocks: Block[],
+  title?: string,
+  /** Diagnostics stamped into the file's metadata, never onto a page. */
+  trace?: { servedBy?: string; fallbackReason?: string },
+): Promise<Buffer> {
   const doc = new PDFDocument({
     size: "A4",
     // Generous top margin: the brand band and its rule live above it, and the
     // title needs clear air beneath the rule or the page reads as cluttered.
     margins: { top: 92, bottom: 68, left: 56, right: 56 },
     bufferPages: true,
-    info: { Title: title ?? firstHeading(blocks) ?? "PassIt", Author: BRAND.name },
+    info: {
+      Title: title ?? firstHeading(blocks) ?? "PassIt",
+      Author: BRAND.name,
+      // Which path produced this file, and why if it fell back. Invisible to a
+      // reader, but it means any delivered PDF can be diagnosed on its own —
+      // no need to reproduce the request and capture the JSON separately.
+      ...(trace?.servedBy
+        ? {
+            Subject: `servedBy=${trace.servedBy}${
+              trace.fallbackReason ? ` | ${trace.fallbackReason}` : ""
+            }`,
+          }
+        : {}),
+    },
   });
 
   const chunks: Buffer[] = [];

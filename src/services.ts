@@ -97,7 +97,13 @@ export async function explainThis(input: ExplainInput): Promise<ServiceResult> {
   const opts = genOpts(input.materials, input.language, "explain_this");
   const { value, servedBy, reason } = await generateReviewer("explain", problem, opts);
   const blocks = reviewerToBlocks(value, "explain_this");
-  const deliveries = await renderDoc(blocks, input.format ?? "pdf", slug(problem) || "explain-this", "Explain-This");
+  const deliveries = await renderDoc(
+    blocks,
+    input.format ?? "pdf",
+    slug(problem) || "explain-this",
+    "Explain-This",
+    { servedBy, fallbackReason: reason },
+  );
   return { summary: oneLine(value.ataGlance), deliveries, servedBy, fallbackReason: reason };
 }
 
@@ -118,7 +124,13 @@ export async function mockExam(input: MockExamInput): Promise<ServiceResult> {
   const exam = await verifyExam(generated.value, opts.deadline);
 
   const blocks = examToBlocks(exam, { withKey: true, serviceId: "mock_exam" });
-  const deliveries = await renderDoc(blocks, input.format ?? "pdf", slug(target) || "mock-exam", "Mock-Exam");
+  const deliveries = await renderDoc(
+    blocks,
+    input.format ?? "pdf",
+    slug(target) || "mock-exam",
+    "Mock-Exam",
+    { servedBy: generated.servedBy, fallbackReason: generated.reason },
+  );
   return {
     summary: `${exam.questions.length}-question ${style.replace("_", " ")} practice test on "${target}", with a fully explained answer key.`,
     deliveries,
@@ -192,7 +204,10 @@ export async function examPack(input: ExamPackInput): Promise<ServiceResult> {
   blocks.push({ t: "p", text: DISCLAIMER });
 
   const base = slug(exam) || "exam-pack";
-  const deliveries = await renderDoc(blocks, input.format ?? "pdf", base, "Exam-Pack");
+  const deliveries = await renderDoc(blocks, input.format ?? "pdf", base, "Exam-Pack", {
+    servedBy: reviewer.servedBy,
+    fallbackReason: reviewer.reason,
+  });
   // Flashcards ride along as an importable CSV — Anki/Quizlet ready.
   deliveries.push(textFile(`PassIt-${base}-Flashcards.csv`, "text/csv", flashcardsToCsv(cards)));
 
@@ -216,17 +231,18 @@ async function deliverReviewer(
 ): Promise<ServiceResult> {
   const base = slug(topic) || serviceId;
   const label = serviceId === "full_reviewer" ? "Full-Reviewer" : "Quick-Reviewer";
+  const trace: Trace = { servedBy, fallbackReason };
   let deliveries: Delivery[];
 
   if (format === "flashcards") {
     const cards = reviewerToFlashcards(reviewer);
     const blocks = flashcardsToBlocks(cards, `${reviewer.title} — Flashcards`);
-    deliveries = await renderDoc(blocks, "pdf", base, "Flashcards");
+    deliveries = await renderDoc(blocks, "pdf", base, "Flashcards", trace);
     deliveries.push(textFile(`PassIt-${base}-Flashcards.csv`, "text/csv", flashcardsToCsv(cards)));
   } else if (format === "cheatsheet") {
-    deliveries = await renderDoc(cheatSheetBlocks(reviewer), "pdf", base, "Cheat-Sheet");
+    deliveries = await renderDoc(cheatSheetBlocks(reviewer), "pdf", base, "Cheat-Sheet", trace);
   } else {
-    deliveries = await renderDoc(reviewerToBlocks(reviewer, serviceId), format, base, label);
+    deliveries = await renderDoc(reviewerToBlocks(reviewer, serviceId), format, base, label, trace);
   }
 
   return { summary: oneLine(reviewer.ataGlance), deliveries, servedBy, fallbackReason };
@@ -237,12 +253,19 @@ async function renderDoc(
   format: "pdf" | "markdown" | OutputFormat,
   base: string,
   label: string,
+  trace?: Trace,
 ): Promise<Delivery[]> {
   if (format === "markdown") {
     return [textFile(`PassIt-${base}-${label}.md`, "text/markdown", blocksToMarkdown(blocks))];
   }
-  const bytes = await blocksToPdf(blocks);
+  const bytes = await blocksToPdf(blocks, undefined, trace);
   return [{ filename: `PassIt-${base}-${label}.pdf`, mimeType: "application/pdf", bytes }];
+}
+
+/** What produced a document, carried into its PDF metadata for diagnosis. */
+interface Trace {
+  servedBy?: string;
+  fallbackReason?: string;
 }
 
 function textFile(filename: string, mimeType: string, text: string): Delivery {
