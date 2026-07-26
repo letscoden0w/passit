@@ -94,4 +94,11 @@ export interface ServiceResult {
   declined?: boolean;
   /** Which provider produced the content ("cache" / "scaffold" / provider id). */
   servedBy?: string;
+  /**
+   * Why the scaffold was used, when it was. Operational diagnostics only —
+   * never rendered into a buyer's file, but without it a fallback is
+   * indistinguishable from a timeout, a rate limit, or malformed model
+   * output, and tuning the budgets becomes guesswork.
+   */
+  fallbackReason?: string;
 }

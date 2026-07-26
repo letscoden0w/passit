@@ -39,6 +39,14 @@ export interface Generated<T> {
   value: T;
   /** Provider id, "cache", or "scaffold". */
   servedBy: string;
+  /** Set only when servedBy is "scaffold": what actually went wrong. */
+  reason?: string;
+}
+
+/** Compress an error into one diagnostic line. */
+function why(err: unknown): string {
+  const msg = (err as Error)?.message ?? String(err);
+  return msg.replace(/\s+/g, " ").slice(0, 300);
 }
 
 // ─── Schemas ─────────────────────────────────────────────────────────
@@ -166,7 +174,7 @@ export async function generateReviewer(
       // Still better to deliver the scaffold than to fail the purchase.
       if (!(err instanceof z.ZodError) && !(err instanceof SyntaxError) && !isJsonError(err)) throw err;
     }
-    return { value: scaffoldReviewer(kind, input, opts), servedBy: "scaffold" };
+    return { value: scaffoldReviewer(kind, input, opts), servedBy: "scaffold", reason: why(err) };
   }
 }
 
@@ -310,7 +318,7 @@ export async function generateMockExam(
     return { value: parsed, servedBy: res.servedBy };
   } catch (err) {
     if (!(err instanceof NoProviderAvailable) && !isRecoverable(err)) throw err;
-    return { value: scaffoldExam(target, style, count, opts), servedBy: "scaffold" };
+    return { value: scaffoldExam(target, style, count, opts), servedBy: "scaffold", reason: why(err) };
   }
 }
 
@@ -520,13 +528,14 @@ const STUDY_ANGLES: ((t: string) => Reviewer["sections"][number])[] = [
   }),
 ];
 
-/** Study actions, rotated so consecutive scaffold sections don't read identically. */
-
-
 /**
- * Angles a learner can self-test from. Cycling these across the topics keeps the
- * fallback varied and genuinely usable — repeating one templated line twenty
- * times is worse than delivering nothing.
+ * Angles a learner can self-test from.
+ *
+ * There must be at least as many of these as the largest exam we will ever
+ * scaffold, because the fallback indexes them directly: with ten angles and a
+ * twenty-five question paper, questions 11-20 came out byte-identical to 1-10.
+ * The scaffold is the safety net a paying buyer sees when everything else has
+ * failed, so it cannot look broken.
  */
 const SELF_TEST_ANGLES: ((topic: string) => string)[] = [
   (t) => `Define ${t} in your own words, without looking at your notes.`,
@@ -539,23 +548,46 @@ const SELF_TEST_ANGLES: ((topic: string) => string)[] = [
   (t) => `Write one exam-style question about ${t}, then answer it.`,
   (t) => `What must be true for ${t} to apply? Name the conditions or assumptions.`,
   (t) => `Sketch or describe ${t} from memory, then check it against your material.`,
+  (t) => `What would a marker expect to see in a full-credit answer about ${t}?`,
+  (t) => `Name a case where ${t} does NOT apply, and explain why not.`,
+  (t) => `Which term inside ${t} could you not define right now? Look it up and write it down.`,
+  (t) => `How would you explain ${t} to someone two years younger than you?`,
+  (t) => `What comes immediately before and after ${t} in your syllabus, and how do they connect?`,
+  (t) => `Turn ${t} into a diagram or flowchart, then describe it in one sentence.`,
+  (t) => `What is the shortest correct answer you could give about ${t} in an exam?`,
+  (t) => `Which single fact about ${t} would cost you the most marks to forget?`,
+  (t) => `State ${t} as a rule, then give one exception to it.`,
+  (t) => `What question about ${t} would you least like to be asked? Answer that one.`,
+  (t) => `Compare ${t} with the topic you studied just before it.`,
+  (t) => `Write three keywords for ${t} and a sentence linking all three.`,
+  (t) => `What everyday situation does ${t} explain? Describe it.`,
+  (t) => `If ${t} appeared as a 10-mark question, how would you structure the answer?`,
+  (t) => `What is the single most common exam trap involving ${t}?`,
+  (t) => `Where does ${t} come from — who or what established it, and why does that matter?`,
+  (t) => `List everything you can recall about ${t} in two minutes, then check for gaps.`,
+  (t) => `Which part of ${t} do you understand least well? Write down why.`,
+  (t) => `How would you check that an answer about ${t} is actually correct?`,
+  (t) => `Summarise ${t} in one sentence a marker would accept.`,
 ];
 
 function scaffoldExam(target: string, style: QuestionStyle, count: number, opts: GenOptions): MockExam {
   const t = titleCase(target);
-  const n = Math.max(1, Math.min(count, 50));
+  // Never ask for more questions than there are distinct prompts to build
+  // them from. A shorter paper of unique questions beats a longer one that
+  // visibly repeats itself.
   const useStyle = (style === "mixed" ? "qa" : style) as Exclude<QuestionStyle, "mixed">;
   const topics = splitTopics(target);
   const subjects = topics.length > 1 ? topics.map(titleCase) : [t];
+  const n = Math.max(1, Math.min(count, SELF_TEST_ANGLES.length * subjects.length));
 
   return {
     title: `${t} — Self-Test`,
     language: opts.language ?? "English",
     questions: Array.from({ length: n }, (_, i) => {
-      // Walk angles and topics on different strides so neighbouring questions
-      // differ in both what they ask and what they ask it about.
-      const subject = subjects[i % subjects.length]!;
+      // Exhaust every angle against one subject before moving to the next, so
+      // no two questions repeat until the whole cross-product is used up.
       const angle = SELF_TEST_ANGLES[i % SELF_TEST_ANGLES.length]!;
+      const subject = subjects[Math.floor(i / SELF_TEST_ANGLES.length) % subjects.length]!;
       return {
         n: i + 1,
         style: useStyle,

@@ -140,10 +140,24 @@ describe("mock_exam", () => {
     assert.ok(md.includes("> **One next step:** Explain This — 0.001 USDT"));
   });
 
-  it("clamps an absurd count to the configured maximum", async () => {
+  it("clamps an absurd count, and never pads the paper with repeats", async () => {
     const result = await mockExam({ target: "Algebra", count: 500, format: "markdown" });
     const md = assertTextFile(result.deliveries[0], "text/markdown");
-    assert.ok(md.includes(`Answer all ${LIMITS.examQuestionsMax} questions.`));
+
+    const asked = /Answer all (\d+) questions\./.exec(md);
+    const delivered = Number(asked?.[1]);
+    assert.ok(Number.isInteger(delivered), `no question count in: ${md.slice(0, 200)}`);
+
+    // Two separate limits. The request is clamped to examQuestionsMax; the
+    // scaffold is additionally capped at however many distinct prompts it can
+    // build, because a shorter paper of unique questions beats a longer one
+    // that repeats itself. A live provider is bound only by the first.
+    assert.ok(
+      delivered <= LIMITS.examQuestionsMax,
+      `delivered ${delivered}, above the ${LIMITS.examQuestionsMax} maximum`,
+    );
+    assert.ok(delivered >= 20, `scaffold delivered only ${delivered} questions`);
+    assert.equal(result.summary.startsWith(`${delivered}-question`), true);
   });
 });
 
@@ -200,5 +214,35 @@ describe("exam_pack", () => {
     assert.ok(md.includes("## Flashcards"));
     assert.ok(md.includes("## Mock exam"));
     assert.ok(md.trimEnd().endsWith(BRAND.disclaimer));
+  });
+});
+
+describe("the scaffold must never look broken", () => {
+  it("produces no duplicate questions, even at the maximum paper length", async () => {
+    const result = await mockExam({
+      target: "Microbiology: Bacteria & Viruses",
+      count: LIMITS.examQuestionsMax,
+      format: "markdown",
+    });
+    const md = assertTextFile(result.deliveries[0], "text/markdown");
+    // Everything is scaffold here — helpers.ts strips the provider keys.
+    assert.equal(result.servedBy, "scaffold");
+
+    const questions = (md.match(/^\d+\.\s+(.+)$/gm) ?? []).map((q) =>
+      q.replace(/^\d+\.\s+/, "").trim(),
+    );
+    assert.ok(questions.length >= 10, `only found ${questions.length} questions`);
+    const unique = new Set(questions);
+    assert.equal(
+      unique.size,
+      questions.length,
+      `${questions.length - unique.size} duplicate question(s) in a ${questions.length}-question paper`,
+    );
+  });
+
+  it("explains why it fell back, so a scaffold is diagnosable", async () => {
+    const result = await quickReviewer({ topic: "Le Chatelier's Principle" });
+    assert.equal(result.servedBy, "scaffold");
+    assert.ok(result.fallbackReason, "a scaffold result must say what went wrong");
   });
 });

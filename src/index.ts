@@ -134,12 +134,21 @@ function sendResult(req: Request, res: Response, id: ServiceId, result: ServiceR
 
   if (result.declined) res.status(422);
 
+  // Always surfaced as a header, so a fallback is diagnosable from a plain
+  // browser download and not only from the JSON form.
+  res.set("X-PassIt-Served-By", result.servedBy ?? "unknown");
+  if (result.fallbackReason) {
+    res.set("X-PassIt-Fallback", encodeURIComponent(result.fallbackReason).slice(0, 900));
+  }
+
   if (wantsJson) {
     res.json({
       service: id,
       summary: result.summary,
       declined: result.declined ?? false,
       servedBy: result.servedBy ?? null,
+      // Present only on a scaffold fallback: what actually went wrong.
+      fallbackReason: result.fallbackReason ?? null,
       files: result.deliveries.map((d) => ({
         filename: d.filename,
         mimeType: d.mimeType,

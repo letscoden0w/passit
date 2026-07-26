@@ -75,8 +75,8 @@ export async function quickReviewer(input: ReviewerInput): Promise<ServiceResult
   if (!guard.allowed) return declined(guard.message!);
 
   const opts = genOpts(input.materials, input.language, "quick_reviewer");
-  const { value, servedBy } = await generateReviewer("quick", topic, opts);
-  return deliverReviewer(value, "quick_reviewer", input.format ?? "pdf", topic, servedBy);
+  const { value, servedBy, reason } = await generateReviewer("quick", topic, opts);
+  return deliverReviewer(value, "quick_reviewer", input.format ?? "pdf", topic, servedBy, reason);
 }
 
 export async function fullReviewer(input: ReviewerInput): Promise<ServiceResult> {
@@ -85,8 +85,8 @@ export async function fullReviewer(input: ReviewerInput): Promise<ServiceResult>
   if (!guard.allowed) return declined(guard.message!);
 
   const opts = genOpts(input.materials, input.language, "full_reviewer");
-  const { value, servedBy } = await generateReviewer("full", subject, opts);
-  return deliverReviewer(value, "full_reviewer", input.format ?? "pdf", subject, servedBy);
+  const { value, servedBy, reason } = await generateReviewer("full", subject, opts);
+  return deliverReviewer(value, "full_reviewer", input.format ?? "pdf", subject, servedBy, reason);
 }
 
 export async function explainThis(input: ExplainInput): Promise<ServiceResult> {
@@ -95,10 +95,10 @@ export async function explainThis(input: ExplainInput): Promise<ServiceResult> {
   if (!guard.allowed) return declined(guard.message!);
 
   const opts = genOpts(input.materials, input.language, "explain_this");
-  const { value, servedBy } = await generateReviewer("explain", problem, opts);
+  const { value, servedBy, reason } = await generateReviewer("explain", problem, opts);
   const blocks = reviewerToBlocks(value, "explain_this");
   const deliveries = await renderDoc(blocks, input.format ?? "pdf", slug(problem) || "explain-this", "Explain-This");
-  return { summary: oneLine(value.ataGlance), deliveries, servedBy };
+  return { summary: oneLine(value.ataGlance), deliveries, servedBy, fallbackReason: reason };
 }
 
 export async function mockExam(input: MockExamInput): Promise<ServiceResult> {
@@ -119,6 +119,7 @@ export async function mockExam(input: MockExamInput): Promise<ServiceResult> {
     summary: `${exam.questions.length}-question ${style.replace("_", " ")} practice test on "${target}", with a fully explained answer key.`,
     deliveries,
     servedBy: generated.servedBy,
+    fallbackReason: generated.reason,
   };
 }
 
@@ -195,6 +196,7 @@ export async function examPack(input: ExamPackInput): Promise<ServiceResult> {
     summary: `Exam Pack for "${exam}": full reviewer, ${cards.length} flashcards, priority list, and a ${verified.questions.length}-question mock exam with explained answer key.`,
     deliveries,
     servedBy: reviewer.servedBy,
+    fallbackReason: reviewer.reason,
   };
 }
 
@@ -206,6 +208,7 @@ async function deliverReviewer(
   format: OutputFormat,
   topic: string,
   servedBy: string,
+  fallbackReason?: string,
 ): Promise<ServiceResult> {
   const base = slug(topic) || serviceId;
   const label = serviceId === "full_reviewer" ? "Full-Reviewer" : "Quick-Reviewer";
@@ -222,7 +225,7 @@ async function deliverReviewer(
     deliveries = await renderDoc(reviewerToBlocks(reviewer, serviceId), format, base, label);
   }
 
-  return { summary: oneLine(reviewer.ataGlance), deliveries, servedBy };
+  return { summary: oneLine(reviewer.ataGlance), deliveries, servedBy, fallbackReason };
 }
 
 async function renderDoc(
@@ -260,31 +263,40 @@ function declined(message: string): ServiceResult {
  * How long a service may spend talking to providers before it gives up and
  * delivers what it has.
  *
- * Read these as "how long the buyer stares at a spinner in the worst case",
- * not "how long we are allowed to keep trying" — when providers are slow the
- * budget IS the response time, and it was measured at 45s for a Quick
- * Reviewer, which is past the gateway timeout on common hosts and far past
- * what anyone will wait. Nothing here may exceed MAX_BUDGET_MS.
+ * These are bounded from both sides and both bounds have been hit in
+ * production. Too high and the buyer's request outlives the gateway, which
+ * returns 502 instead of the file. Too low and a perfectly healthy generation
+ * is cut off mid-flight, which delivers the scaffold — a real PDF, but generic
+ * filler instead of the content that was paid for. A 15s Quick Reviewer
+ * measured as the second failure: every request came back "scaffold".
  *
- * The healthy path is unaffected: a free tier that is working answers in a
- * few seconds and never comes near these.
+ * So a budget must comfortably exceed ONE realistic generation. A 2-3 page
+ * reviewer is a few thousand tokens, which is 10-20s on a free tier, so the
+ * floor is around 30s and the ceiling is the host's gateway timeout.
  */
 const TIME_BUDGET_MS: Record<ServiceId, number> = {
-  explain_this: 12_000,
-  quick_reviewer: 15_000,
-  mock_exam: 22_000,
+  // Smallest output (2,000 tokens), so it needs the least.
+  explain_this: 20_000,
+  quick_reviewer: 32_000,
+  mock_exam: 40_000,
   // These two make several generations, but concurrently — so the budget
   // covers the slowest call plus a follow-up, not the sum of every call.
-  full_reviewer: 22_000,
-  exam_pack: 25_000,
+  full_reviewer: 40_000,
+  exam_pack: 45_000,
 };
 
 /**
- * Hard ceiling on any service's budget. The default leaves headroom under a
- * 30s gateway timeout; raise it on a host that allows longer requests, or drop
- * it if 502s appear, without touching the per-service numbers above.
+ * Hard ceiling on any service's budget, and the single knob for tuning against
+ * a specific host. Lower it if 502s appear (the gateway is cutting requests
+ * off); raise it if responses come back "scaffold" while the providers are
+ * healthy (generations are being cut off before they finish).
  */
-const MAX_BUDGET_MS = Math.max(5_000, Number(process.env.MAX_REQUEST_SECONDS ?? 25) * 1_000);
+const MAX_BUDGET_MS = Math.max(5_000, Number(process.env.MAX_REQUEST_SECONDS ?? 45) * 1_000);
+
+/** The effective budget for a service, after the global ceiling is applied. */
+export function serviceBudgetMs(service: ServiceId): number {
+  return Math.min(TIME_BUDGET_MS[service], MAX_BUDGET_MS);
+}
 
 function genOpts(
   materials: string | undefined,
@@ -294,7 +306,7 @@ function genOpts(
   return {
     materials: materials ? clampText(materials, LIMITS.materialsMaxChars) : undefined,
     language,
-    deadline: Date.now() + Math.min(TIME_BUDGET_MS[service], MAX_BUDGET_MS),
+    deadline: Date.now() + serviceBudgetMs(service),
   };
 }
 

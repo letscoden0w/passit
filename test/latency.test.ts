@@ -7,10 +7,17 @@
 import "./helpers.js";
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { examPack, explainThis, fullReviewer, mockExam, quickReviewer } from "../src/services.js";
+import {
+  examPack,
+  explainThis,
+  fullReviewer,
+  mockExam,
+  quickReviewer,
+  serviceBudgetMs,
+} from "../src/services.js";
 import { resetProviderHealth } from "../src/engine/providers.js";
 import { cacheClear } from "../src/engine/cache.js";
-import type { ServiceResult } from "../src/types.js";
+import type { ServiceId, ServiceResult } from "../src/types.js";
 import { assertDelivered } from "./helpers.js";
 
 const realFetch = globalThis.fetch;
@@ -35,12 +42,19 @@ afterEach(() => {
 });
 
 /**
- * Ceiling for any single service. Hosts commonly cut a request off at 30s;
- * staying under this is what keeps a stalled provider from becoming a 502.
+ * Rendering and PDF assembly on top of the provider budget. Anything beyond
+ * this is time nobody accounted for.
  */
-const CEILING_MS = 26_000;
+const OVERHEAD_MS = 4_000;
 
-const services: Array<[string, () => Promise<ServiceResult>]> = [
+/**
+ * Assert against the service's own configured budget rather than a magic
+ * number. The budget itself is a product decision — too low cuts off healthy
+ * generations and everything returns the scaffold, too high and the request
+ * outlives the gateway — but whatever it is set to, a stalled provider must
+ * not be able to push a response past it.
+ */
+const services: Array<[ServiceId, () => Promise<ServiceResult>]> = [
   ["explain_this", () => explainThis({ problem: "Why flip and multiply?" })],
   ["quick_reviewer", () => quickReviewer({ topic: "Ohm's Law" })],
   ["mock_exam", () => mockExam({ target: "Circulatory System" })],
@@ -62,7 +76,8 @@ describe("worst-case latency with every provider hung", () => {
       const result = await call();
       const elapsed = Date.now() - started;
 
-      assert.ok(elapsed < CEILING_MS, `${name} took ${elapsed}ms, ceiling is ${CEILING_MS}ms`);
+      const ceiling = serviceBudgetMs(name) + OVERHEAD_MS;
+      assert.ok(elapsed < ceiling, `${name} took ${elapsed}ms, its budget allows ${ceiling}ms`);
       // Slow must degrade to the scaffold, never to an empty response.
       assertDelivered(result);
       assert.equal(result.servedBy, "scaffold");
