@@ -117,13 +117,32 @@ describe("full_reviewer", () => {
 });
 
 describe("mock_exam", () => {
-  it("defaults to a full 25-question paper", async () => {
+  it("defaults to a full 25-question multiple-choice paper", async () => {
     const result = await mockExam({ target: "Newton's Laws" });
     assertPdf(result.deliveries[0], "PassIt-newtons-laws-Mock-Exam.pdf");
+    // Multiple choice by default: a paper the buyer can sit and mark, not a
+    // list of open prompts with nothing to choose between.
     assert.ok(
-      result.summary.startsWith(`${DEFAULT_EXAM_QUESTIONS}-question mixed practice test`),
+      result.summary.startsWith(`${DEFAULT_EXAM_QUESTIONS}-question multiple choice practice test`),
       `unexpected summary: ${result.summary}`,
     );
+  });
+
+  it("never offers empty placeholder options", async () => {
+    // Everything here is scaffold (helpers.ts strips the keys), and the
+    // scaffold has no topic knowledge, so it cannot invent three plausible
+    // wrong answers. It used to emit "A) ... B) ... C) ... D) ..." anyway,
+    // which advertises a multiple-choice paper that cannot be answered.
+    const result = await mockExam({
+      target: "Newton's Laws",
+      style: "multiple_choice",
+      count: 8,
+      format: "markdown",
+    });
+    const md = assertTextFile(result.deliveries[0], "text/markdown");
+    assert.equal(result.servedBy, "scaffold");
+    assert.ok(!/^- [A-D]\)\s*(…|\.\.\.)?\s*$/m.test(md), "placeholder options in the paper");
+    assert.ok(!md.includes("A) …"), "empty A) option rendered");
   });
 
   it("honours an explicit count and style, and always ships the answer key", async () => {

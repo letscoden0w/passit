@@ -106,7 +106,11 @@ export async function mockExam(input: MockExamInput): Promise<ServiceResult> {
   const guard = checkRequest(target, input.materials);
   if (!guard.allowed) return declined(guard.message!);
 
-  const style: QuestionStyle = input.style ?? "mixed";
+  // Multiple choice by default. "mixed" let the model return open-ended
+  // prompts with no options to choose from, which is not what anyone means by
+  // a practice exam — a buyer wants A/B/C/D they can answer and mark. Ask for
+  // "mixed", "qa" or "true_false" explicitly to get something else.
+  const style: QuestionStyle = input.style ?? "multiple_choice";
   const count = resolveQuestionCount(input.count);
   const opts = genOpts(input.materials, input.language, "mock_exam");
 
@@ -147,7 +151,7 @@ export async function examPack(input: ExamPackInput): Promise<ServiceResult> {
     generateMostLikely(exam, topics || exam, opts),
     // `subject`, not `exam`: passing the bare exam name left the questions
     // roaming the whole field instead of the topics the buyer paid for.
-    generateMockExam(subject, "mixed", 20, opts),
+    generateMockExam(subject, "multiple_choice", 20, opts),
   ]);
   // The one real dependency: an exam cannot be re-solved before it exists.
   const verified = await verifyExam(examGen.value, opts.deadline);

@@ -253,7 +253,12 @@ naturally ask. Number your questions from 1; they are renumbered on assembly.`
     languageBlock(language),
     `RULES:
 - Order questions easy -> hard, the way a real exam warms up.
-- Multiple choice: exactly 4 options, one clearly correct, distractors plausible.
+- EVERY multiple_choice question MUST carry exactly 4 options in "choices",
+  labelled "A) ...", "B) ...", "C) ...", "D) ...". One clearly correct, the other
+  three plausible. A multiple_choice question with no options cannot be answered
+  and will be discarded.
+- Unless the style says otherwise, prefer multiple_choice: a practice paper the
+  buyer can actually sit and mark beats a list of open prompts.
 - VARIETY IS A REQUIREMENT. No two questions may test the same fact, and no more than a
   quarter of the paper may use the same computation or template. Ten questions that all
   plug numbers into one formula is a failed exam paper — vary the formula, vary what is

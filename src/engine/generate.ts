@@ -615,7 +615,12 @@ function scaffoldExam(target: string, style: QuestionStyle, count: number, opts:
   // Never ask for more questions than there are distinct prompts to build
   // them from. A shorter paper of unique questions beats a longer one that
   // visibly repeats itself.
-  const useStyle = (style === "mixed" ? "qa" : style) as Exclude<QuestionStyle, "mixed">;
+  // Always open-ended, whatever was asked for. The scaffold has no topic
+  // knowledge, so it cannot write three plausible wrong answers — offering
+  // "A) ... B) ... C) ..." placeholders would be a worse paper than an honest
+  // open question, and it advertises multiple choice it cannot deliver.
+  const useStyle: Exclude<QuestionStyle, "mixed"> = "qa";
+  void style;
   const topics = splitTopics(target);
   const subjects = topics.length > 1 ? topics.map(titleCase) : [t];
   const n = Math.max(1, Math.min(count, SELF_TEST_ANGLES.length * subjects.length));
@@ -632,11 +637,7 @@ function scaffoldExam(target: string, style: QuestionStyle, count: number, opts:
         n: i + 1,
         style: useStyle,
         prompt: angle(subject),
-        ...(useStyle === "multiple_choice"
-          ? { choices: ["A) …", "B) …", "C) …", "D) …"] }
-          : useStyle === "true_false"
-            ? { choices: ["True", "False"] }
-            : {}),
+
         answer: "Open-ended — check your answer against your class material.",
         why: "Written prompts were unavailable, so this is a self-test question rather than a graded item.",
       };
