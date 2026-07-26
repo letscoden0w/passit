@@ -187,13 +187,50 @@ export interface ProviderConfig {
   id: ProviderId;
   apiKey: string;
   model: string;
+  /**
+   * Largest max_tokens this provider will accept without tripping its own
+   * per-minute limit.
+   *
+   * Free tiers reserve against the max_tokens you ASK for, not what you end up
+   * using — so a request whose ceiling exceeds the per-minute allowance is
+   * refused before a single token is generated, no matter how short the reply
+   * would have been. Groq's free allowance is about 6,000 tokens/minute, which
+   * is why a 25-question exam asking for 6,700 was rejected every single time
+   * while a 2,000-token Explain This always succeeded.
+   */
+  maxTokensCap: number;
 }
 
-const PROVIDER_ENV: Record<ProviderId, { key: string; model: string; fallbackModel: string }> = {
-  groq: { key: "GROQ_API_KEY", model: "GROQ_MODEL", fallbackModel: "llama-3.3-70b-versatile" },
-  mistral: { key: "MISTRAL_API_KEY", model: "MISTRAL_MODEL", fallbackModel: "mistral-large-latest" },
-  gemini: { key: "GEMINI_API_KEY", model: "GEMINI_MODEL", fallbackModel: "gemini-2.5-flash" },
-  cerebras: { key: "CEREBRAS_API_KEY", model: "CEREBRAS_MODEL", fallbackModel: "llama-3.3-70b" },
+const PROVIDER_ENV: Record<
+  ProviderId,
+  { key: string; model: string; fallbackModel: string; cap: number }
+> = {
+  // 6,000 tokens/minute free. Held under it with room for the prompt, which
+  // also counts toward the same allowance.
+  groq: {
+    key: "GROQ_API_KEY",
+    model: "GROQ_MODEL",
+    fallbackModel: "llama-3.3-70b-versatile",
+    cap: 3_500,
+  },
+  mistral: {
+    key: "MISTRAL_API_KEY",
+    model: "MISTRAL_MODEL",
+    fallbackModel: "mistral-large-latest",
+    cap: 8_000,
+  },
+  gemini: {
+    key: "GEMINI_API_KEY",
+    model: "GEMINI_MODEL",
+    fallbackModel: "gemini-2.5-flash",
+    cap: 8_000,
+  },
+  cerebras: {
+    key: "CEREBRAS_API_KEY",
+    model: "CEREBRAS_MODEL",
+    fallbackModel: "llama-3.3-70b",
+    cap: 8_000,
+  },
   // `openrouter/free` is an auto-router: it picks among OpenRouter's free
   // models and filters for the capabilities the request needs (we ask for JSON
   // output), so one key fronts many models and survives any single one going
@@ -202,6 +239,8 @@ const PROVIDER_ENV: Record<ProviderId, { key: string; model: string; fallbackMod
     key: "OPENROUTER_API_KEY",
     model: "OPENROUTER_MODEL",
     fallbackModel: "openrouter/free",
+    // The auto-router may land on any free model, so assume a modest ceiling.
+    cap: 4_000,
   },
 };
 
@@ -219,6 +258,7 @@ export function providerChain(): ProviderConfig[] {
         id,
         apiKey: process.env[env.key] ?? "",
         model: process.env[env.model] || env.fallbackModel,
+        maxTokensCap: env.cap,
       };
     })
     .filter((p) => p.apiKey.length > 0);

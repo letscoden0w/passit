@@ -51,10 +51,11 @@ class ProviderError extends Error {
 
 /**
  * Longest we will hold a request waiting for a rate limit to clear before
- * moving on. Free tiers meter per minute, so short waits are common and
- * usually cheaper than falling through to a weaker provider.
+ * moving on. Free tiers meter per minute, so short waits are common and often
+ * cheaper than falling through to a weaker provider — but a long one spends
+ * the buyer's budget doing nothing, and 12s was a third of a Quick Reviewer's.
  */
-const MAX_INLINE_WAIT_MS = 12_000;
+const MAX_INLINE_WAIT_MS = 4_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -194,6 +195,18 @@ const OPENROUTER_HEADERS: Record<string, string> = {
   "X-Title": "PassIt",
 };
 
+/**
+ * Never ask a provider for more than its per-minute allowance permits.
+ *
+ * Asking for more is not merely wasteful — free tiers reserve against the
+ * requested ceiling, so an oversized max_tokens is refused outright and every
+ * retry fails the same way. Trimming the ask costs a little length; not
+ * trimming it cost the entire response.
+ */
+function cappedTokens(provider: ProviderConfig, requested: number | undefined): number {
+  return Math.min(requested ?? 4096, provider.maxTokensCap);
+}
+
 async function callProvider(provider: ProviderConfig, opts: CompleteOptions): Promise<string> {
   if (provider.id === "gemini") return callGemini(provider, opts);
   const url = OPENAI_COMPATIBLE[provider.id];
@@ -218,7 +231,7 @@ async function callOpenAiCompatible(
       body: JSON.stringify({
         model: provider.model,
         temperature: opts.temperature ?? 0.4,
-        max_tokens: opts.maxTokens ?? 4096,
+        max_tokens: cappedTokens(provider, opts.maxTokens),
         ...(opts.json ? { response_format: { type: "json_object" } } : {}),
         messages: [
           { role: "system", content: opts.system },
@@ -251,7 +264,7 @@ async function callGemini(provider: ProviderConfig, opts: CompleteOptions): Prom
         contents: [{ role: "user", parts: [{ text: opts.user }] }],
         generationConfig: {
           temperature: opts.temperature ?? 0.4,
-          maxOutputTokens: opts.maxTokens ?? 4096,
+          maxOutputTokens: cappedTokens(provider, opts.maxTokens),
           ...(opts.json ? { responseMimeType: "application/json" } : {}),
         },
       }),

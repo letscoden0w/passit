@@ -233,12 +233,19 @@ export function mockExamPrompt(
   count: number,
   materials?: string,
   language?: string,
+  /** Which slice of a batched paper this is, when a paper is split. */
+  part?: { index: number; total: number },
 ): string {
   return join([
     `Build a realistic MOCK EXAM (practice test).`,
     `TARGET (topic, subject or exam): ${target}`,
     `STYLE: ${style}   — one of multiple_choice, qa, true_false, mixed`,
     `NUMBER OF QUESTIONS: ${count}`,
+    part && part.total > 1
+      ? `This is SECTION ${part.index} of ${part.total} of one exam paper. Cover the part of the
+scope that belongs to section ${part.index} and do not repeat questions the other sections would
+naturally ask. Number your questions from 1; they are renumbered on assembly.`
+      : "",
     materials
       ? `Questions MUST come only from the attached material below.`
       : `Cover the whole scope evenly — do not cluster on one subtopic.`,

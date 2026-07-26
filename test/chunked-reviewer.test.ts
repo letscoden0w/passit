@@ -224,10 +224,12 @@ describe("concurrency", () => {
 
     await examPack({ exam: "Nursing Board Pharmacology", topics: "Antibiotics, Analgesics" });
 
-    // reviewer + flashcards + mostLikely + mockExam all in flight together.
-    assert.equal(probe.peak(), 4, `exam pack ran ${probe.peak()} at a time — expected 4`);
-    // 4 concurrent + the dependent re-solve. If the reviewer were chunked this
-    // would be 8, which is what made the Exam Pack time out.
-    assert.equal(probe.total(), 5, `exam pack made ${probe.total()} calls — expected 5`);
+    // reviewer + flashcards + mostLikely + two exam batches, all in flight at
+    // once. The 20-question exam is split so no single call asks for a
+    // max_tokens ceiling above what a free tier will accept.
+    assert.equal(probe.peak(), 5, `exam pack ran ${probe.peak()} at a time — expected 5`);
+    // 5 concurrent + the dependent re-solve. Were the reviewer chunked as well
+    // this would be 9 sequential calls, which is what made it time out.
+    assert.equal(probe.total(), 6, `exam pack made ${probe.total()} calls — expected 6`);
   });
 });

@@ -292,6 +292,18 @@ const SYNTHESIS_RESERVE_MS = 15_000;
 
 // ─── Mock exam ───────────────────────────────────────────────────────
 
+/**
+ * Questions per provider call.
+ *
+ * A whole paper in one request needs a max_tokens ceiling above what a free
+ * tier will accept, and those tiers reserve against the ceiling you ask for
+ * rather than what you use — so a 25-question paper was refused outright every
+ * time while a short one always succeeded. Batching keeps every call small
+ * enough to be accepted, and the batches run concurrently so a longer paper
+ * costs no extra wall-clock.
+ */
+const EXAM_BATCH_SIZE = 12;
+
 export async function generateMockExam(
   target: string,
   style: QuestionStyle,
@@ -305,21 +317,49 @@ export async function generateMockExam(
     if (hit) return { value: hit, servedBy: "cache" };
   }
 
-  const user = mockExamPrompt(target, style, count, opts.materials, opts.language);
-  try {
-    // Scale the ceiling to the paper being asked for. A flat 8,000 asks free
-    // tiers for far more than a short exam needs, and some of them reject a
-    // request whose max_tokens exceeds their per-minute allowance outright.
-    const maxTokens = Math.min(8_000, 1_200 + count * 220);
-    const res = await complete({ system: SYSTEM, user, json: true, maxTokens, deadline: opts.deadline });
-    const parsed = MockExamZ.parse(extractJson(res.text)) as MockExam;
-    parsed.questions = parsed.questions.slice(0, count).map((q, i) => ({ ...q, n: i + 1 }));
-    if (cacheable) cacheSet(key, parsed);
-    return { value: parsed, servedBy: res.servedBy };
-  } catch (err) {
-    if (!(err instanceof NoProviderAvailable) && !isRecoverable(err)) throw err;
-    return { value: scaffoldExam(target, style, count, opts), servedBy: "scaffold", reason: why(err) };
+  const batches = Math.max(1, Math.ceil(count / EXAM_BATCH_SIZE));
+  const sizes = Array.from({ length: batches }, (_, i) =>
+    // Spread the remainder so no batch is left with one stray question.
+    Math.floor(count / batches) + (i < count % batches ? 1 : 0),
+  );
+
+  const settled = await Promise.all(
+    sizes.map(async (size, i) => {
+      try {
+        const res = await complete({
+          system: SYSTEM,
+          user: mockExamPrompt(target, style, size, opts.materials, opts.language, {
+            index: i + 1,
+            total: batches,
+          }),
+          json: true,
+          maxTokens: Math.min(3_200, 800 + size * 200),
+          deadline: opts.deadline,
+        });
+        return { exam: MockExamZ.parse(extractJson(res.text)) as MockExam, servedBy: res.servedBy };
+      } catch (err) {
+        // A failed batch costs its questions, not the whole paper.
+        if (!(err instanceof NoProviderAvailable) && !isRecoverable(err)) throw err;
+        return null;
+      }
+    }),
+  );
+
+  const ok = settled.filter((r) => r !== null);
+  const questions = ok.flatMap((r) => r.exam.questions);
+
+  if (questions.length === 0) {
+    const reason = "every exam batch failed";
+    return { value: scaffoldExam(target, style, count, opts), servedBy: "scaffold", reason };
   }
+
+  const value: MockExam = {
+    title: ok[0]!.exam.title || `${titleCase(target)} — Mock Exam`,
+    language: ok[0]!.exam.language || opts.language || "English",
+    questions: questions.slice(0, count).map((q, i) => ({ ...q, n: i + 1 })),
+  };
+  if (cacheable) cacheSet(key, value);
+  return { value, servedBy: ok[0]!.servedBy };
 }
 
 // ─── Exam Pack helpers ───────────────────────────────────────────────
