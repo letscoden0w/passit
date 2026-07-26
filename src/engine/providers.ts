@@ -31,6 +31,27 @@ export class NoProviderAvailable extends Error {
   }
 }
 
+/** A provider refused this call. `retryAfterMs` is set when it told us how long to wait. */
+class ProviderError extends Error {
+  constructor(
+    message: string,
+    readonly status: number | undefined,
+    readonly retryAfterMs: number | undefined,
+  ) {
+    super(message);
+    this.name = "ProviderError";
+  }
+}
+
+/**
+ * Longest we will hold a request waiting for a rate limit to clear before
+ * moving on. Free tiers meter per minute, so short waits are common and
+ * usually cheaper than falling through to a weaker provider.
+ */
+const MAX_INLINE_WAIT_MS = 12_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 // ─── Cooldown bookkeeping ────────────────────────────────────────────
 
 const benchedUntil = new Map<ProviderId, number>();
@@ -75,23 +96,74 @@ export async function complete(
 
   const errors: string[] = [];
   for (const provider of candidates) {
-    try {
-      const text = await callProvider(provider, opts);
-      if (!text.trim()) throw new Error("empty response");
-      return { text, servedBy: provider.id };
-    } catch (err) {
-      const message = (err as Error).message;
-      errors.push(`${provider.id}: ${message}`);
-      // Bench on rate limit / server error / timeout; a malformed single
-      // response shouldn't sideline an otherwise healthy provider.
-      if (shouldBench(message)) bench(provider.id, Date.now());
+    // One in-place retry: free tiers meter per minute, so a 429 with a short
+    // retry-after is worth waiting out rather than benching the provider for
+    // minutes. This is what kept multi-call services (Exam Pack fires four
+    // generations back to back) from collapsing onto the scaffold.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const text = await callProvider(provider, opts);
+        if (!text.trim()) throw new Error("empty response");
+        return { text, servedBy: provider.id };
+      } catch (err) {
+        const pe = err instanceof ProviderError ? err : undefined;
+        errors.push(`${provider.id}: ${(err as Error).message}`);
+
+        const waitable =
+          pe?.status === 429 &&
+          attempt === 0 &&
+          pe.retryAfterMs !== undefined &&
+          pe.retryAfterMs <= MAX_INLINE_WAIT_MS;
+
+        if (waitable) {
+          await sleep(pe!.retryAfterMs! + 250);
+          continue; // same provider, second attempt
+        }
+
+        if (shouldBench(err)) bench(provider.id, Date.now(), benchFor(pe));
+        break; // move to the next provider
+      }
     }
   }
   throw new NoProviderAvailable(`All providers failed — ${errors.join(" | ")}`);
 }
 
-function shouldBench(message: string): boolean {
+/**
+ * Bench only for as long as the provider actually asked for. A flat multi-minute
+ * cooldown turns one transient 429 into minutes of degraded output.
+ */
+function benchFor(pe: ProviderError | undefined): number {
+  if (pe?.retryAfterMs !== undefined) {
+    return Math.min(Math.max(pe.retryAfterMs, 1_000), PROVIDER_COOLDOWN_MS);
+  }
+  return PROVIDER_COOLDOWN_MS;
+}
+
+function shouldBench(err: unknown): boolean {
+  const message = (err as Error)?.message ?? "";
   return /\b(429|5\d\d)\b|rate.?limit|quota|timeout|abort|ECONN|fetch failed/i.test(message);
+}
+
+/** Read a Retry-After header (seconds, or an HTTP date) into milliseconds. */
+function retryAfterMs(res: Response): number | undefined {
+  const raw = res.headers.get("retry-after") ?? res.headers.get("x-ratelimit-reset-tokens");
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+
+  // Groq returns durations like "7.5s" or "2m59.56s" on x-ratelimit-reset-*.
+  const duration = trimmed.match(/^(?:(\d+(?:\.\d+)?)m)?(\d+(?:\.\d+)?)s$/i);
+  if (duration) {
+    const mins = Number(duration[1] ?? 0);
+    const secs = Number(duration[2] ?? 0);
+    return Math.round((mins * 60 + secs) * 1000);
+  }
+
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.round(seconds * 1000));
+
+  const date = Date.parse(trimmed);
+  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
+  return undefined;
 }
 
 // ─── Provider implementations ────────────────────────────────────────
@@ -131,7 +203,7 @@ async function callOpenAiCompatible(
       ],
     }),
   });
-  if (!res.ok) throw new Error(`${res.status} ${await peek(res)}`);
+  if (!res.ok) throw new ProviderError(`${res.status} ${await peek(res)}`, res.status, retryAfterMs(res));
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
@@ -157,7 +229,7 @@ async function callGemini(provider: ProviderConfig, opts: CompleteOptions): Prom
       },
     }),
   });
-  if (!res.ok) throw new Error(`${res.status} ${await peek(res)}`);
+  if (!res.ok) throw new ProviderError(`${res.status} ${await peek(res)}`, res.status, retryAfterMs(res));
   const data = (await res.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };

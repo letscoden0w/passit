@@ -77,10 +77,27 @@ export function fullReviewerPrompt(subject: string, materials?: string, language
     `SUBJECT / TOPICS: ${subject}`,
     materialsBlock(materials),
     languageBlock(language),
-    `STRUCTURE: one section per topic, ordered for learning — foundations first, details after.`,
-    `SIZE: about one section per topic. Typical 4-10 sections, hard cap 12. If the subject needs
-more, cover the most important topics fully and list what was left out in uncertainNotes.`,
-    `Add comparisonTables wherever topics contrast or connect — that is where marks are won.`,
+    `STRUCTURE: ordered for learning — foundations first, details after.`,
+    `THIS IS NOT A QUICK REVIEWER. A Quick Reviewer is one page of highlights. A Full Reviewer is a
+complete study guide someone can revise an entire subject from without opening another book.
+If your output would fit on two pages, it is wrong — go deeper.
+
+DEPTH IS THE POINT. Break every named topic into 2-4 SUB-SECTIONS of its own, each its own entry
+in "sections". Three named topics should therefore produce roughly 8-12 sections, not 3.
+
+For EVERY section:
+- "explanation" must be 100-200 words: define the idea, explain the mechanism or reasoning step
+  by step, and give a concrete worked example or real-world case. One or two sentences is a
+  failure. Teach it, don't just name it.
+- "memoryTrick": a real mnemonic, analogy or rule of thumb.
+- "table": at least 4 rows of substance where the topic has parts, types, stages or contrasts.
+- "bullets": 3-6 specific facts, common exam traps, or worked numbers — not restatements of the
+  explanation.`,
+    `Add 2-3 comparisonTables covering the whole subject, each with at least 4 rows — cross-topic
+contrasts are where marks are won and where shallow reviewers lose them.`,
+    `Give 6-10 "studyFirst" items and 5-8 "quickCheck" questions spread across the whole subject.`,
+    `If the subject is genuinely enormous, cover the most important topics at FULL depth and list
+what you left out in uncertainNotes. Never thin out every topic to fit more in.`,
     REVIEWER_SCHEMA,
   ]);
 }

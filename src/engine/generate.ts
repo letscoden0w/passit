@@ -243,8 +243,8 @@ function scaffoldReviewer(kind: ReviewerKind, input: string, opts: GenOptions): 
 
   const sections =
     kind === "full" && topics.length > 1
-      ? topics.map(scaffoldSection)
-      : [scaffoldSection(input)];
+      ? topics.map((topic, i) => scaffoldSection(topic, i))
+      : [scaffoldSection(input, 0)];
 
   return {
     title: `${title} — ${kind === "full" ? "Full" : "Quick"} Reviewer`,
@@ -259,40 +259,89 @@ function scaffoldReviewer(kind: ReviewerKind, input: string, opts: GenOptions): 
   };
 }
 
-function scaffoldSection(topic: string): Reviewer["sections"][number] {
+/** Study actions, rotated so consecutive scaffold sections don't read identically. */
+const STUDY_ACTIONS: string[][] = [
+  [
+    "Write the definition in your own words, then compare it to your notes",
+    "List its parts or stages in order",
+    "Work through one example end to end",
+  ],
+  [
+    "Say out loud how it works, as if teaching someone",
+    "Note the one step you keep getting wrong",
+    "Find a second example that looks different but follows the same rule",
+  ],
+  [
+    "Draw or diagram it from memory, then check it",
+    "Write down what must be true for it to apply",
+    "Name the topic it is most easily confused with, and the tell that separates them",
+  ],
+  [
+    "Turn the key facts into a three-column table",
+    "Write one exam-style question on it, then answer it",
+    "Mark anything you could not explain without looking",
+  ],
+];
+
+function scaffoldSection(topic: string, index: number): Reviewer["sections"][number] {
   const t = titleCase(topic);
   return {
     heading: t,
-    explanation: `Break "${t}" into four parts: (1) what it is, (2) why it matters, (3) how it works, (4) one worked example.`,
-    memoryTrick: `Build a one-line story that links the parts of ${t} in order.`,
-    bullets: [
-      "Define it in your own words",
-      "List its parts",
-      "Write one worked example",
-      "Note the mistake you make most often",
-    ],
+    explanation:
+      `Work through "${t}" in four passes: what it is, why it matters, how it works, and one ` +
+      `worked example. Write each pass down — recalling it onto paper is what makes it stick, ` +
+      `and the gaps you hit are exactly what to revise.`,
+    memoryTrick: `Link the parts of ${t} into a single one-line story, in the order they happen.`,
+    bullets: STUDY_ACTIONS[index % STUDY_ACTIONS.length]!,
   };
 }
+
+/**
+ * Angles a learner can self-test from. Cycling these across the topics keeps the
+ * fallback varied and genuinely usable — repeating one templated line twenty
+ * times is worse than delivering nothing.
+ */
+const SELF_TEST_ANGLES: ((topic: string) => string)[] = [
+  (t) => `Define ${t} in your own words, without looking at your notes.`,
+  (t) => `Explain how ${t} works, step by step, as if teaching a classmate.`,
+  (t) => `Give one real example of ${t} and say why it fits.`,
+  (t) => `What is the most common mistake people make with ${t}, and why?`,
+  (t) => `Which other topic is ${t} most easily confused with? How do you tell them apart?`,
+  (t) => `List the parts or stages of ${t} in the correct order.`,
+  (t) => `Why does ${t} matter — what breaks or changes if it is missing?`,
+  (t) => `Write one exam-style question about ${t}, then answer it.`,
+  (t) => `What must be true for ${t} to apply? Name the conditions or assumptions.`,
+  (t) => `Sketch or describe ${t} from memory, then check it against your material.`,
+];
 
 function scaffoldExam(target: string, style: QuestionStyle, count: number, opts: GenOptions): MockExam {
   const t = titleCase(target);
   const n = Math.max(1, Math.min(count, 50));
   const useStyle = (style === "mixed" ? "qa" : style) as Exclude<QuestionStyle, "mixed">;
+  const topics = splitTopics(target);
+  const subjects = topics.length > 1 ? topics.map(titleCase) : [t];
+
   return {
-    title: `${t} — Mock Exam`,
+    title: `${t} — Self-Test`,
     language: opts.language ?? "English",
-    questions: Array.from({ length: n }, (_, i) => ({
-      n: i + 1,
-      style: useStyle,
-      prompt: `(${t}) Self-test #${i + 1}: state a key fact about ${t} and explain why it matters.`,
-      ...(useStyle === "multiple_choice"
-        ? { choices: ["A) …", "B) …", "C) …", "D) …"] }
-        : useStyle === "true_false"
-          ? { choices: ["True", "False"] }
-          : {}),
-      answer: "Check against your class material.",
-      why: "Automatic writing was unavailable — this is a self-test prompt, not a graded item.",
-    })),
+    questions: Array.from({ length: n }, (_, i) => {
+      // Walk angles and topics on different strides so neighbouring questions
+      // differ in both what they ask and what they ask it about.
+      const subject = subjects[i % subjects.length]!;
+      const angle = SELF_TEST_ANGLES[i % SELF_TEST_ANGLES.length]!;
+      return {
+        n: i + 1,
+        style: useStyle,
+        prompt: angle(subject),
+        ...(useStyle === "multiple_choice"
+          ? { choices: ["A) …", "B) …", "C) …", "D) …"] }
+          : useStyle === "true_false"
+            ? { choices: ["True", "False"] }
+            : {}),
+        answer: "Open-ended — check your answer against your class material.",
+        why: "Written prompts were unavailable, so this is a self-test question rather than a graded item.",
+      };
+    }),
   };
 }
 
